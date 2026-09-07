@@ -1,0 +1,11 @@
+{
+  "name": "Open Cybersecurity Schema Framework",
+  "upstream": "https://github.com/ocsf/ocsf-schema",
+  "version": "1.9.0",
+  "git_commit": "856d462bd20dc46cc1ffed2dfffe3b91ef0fbeba",
+  "license": "Apache-2.0",
+  "tree_hash_algorithm": "sha256(path + NUL + sha256(file) + LF)",
+  "tree_sha256": "17f3f23065f7a74348d5822eafca9ae56f38cbe575f61531f739e59b728821c5",
+  "tree_file_count": 344,
+  "excluded_paths": [".github/**", ".vscode/**"]
+}
