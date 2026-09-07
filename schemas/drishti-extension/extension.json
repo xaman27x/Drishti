@@ -1,0 +1,7 @@
+{
+  "uid": 9001,
+  "caption": "Drishti Evidence",
+  "description": "Private Drishti extension for evidence lineage and normalization provenance. UID 9001 is an internal, unregistered namespace and is never represented as an official OCSF allocation.",
+  "name": "drishti",
+  "version": "0.1.0"
+}

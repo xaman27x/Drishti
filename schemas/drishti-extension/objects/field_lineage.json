@@ -1,0 +1,15 @@
+{
+  "caption": "Field Lineage",
+  "description": "Links an OCSF field or parser decision to an exact byte span in immutable raw evidence.",
+  "extends": "object",
+  "name": "field_lineage",
+  "attributes": {
+    "byte_end": {"requirement": "required"},
+    "byte_start": {"requirement": "required"},
+    "disposition": {"requirement": "required"},
+    "fragment_sha256": {"requirement": "required"},
+    "rule_uid": {"requirement": "required"},
+    "target_path": {"requirement": "optional"},
+    "transformation": {"requirement": "optional"}
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "caption": "Parser Identity",
+  "description": "Cryptographic identity of the approved deterministic parser bundle.",
+  "extends": "object",
+  "name": "parser_identity",
+  "attributes": {
+    "parser_bundle_sha256": {"requirement": "required"},
+    "parser_bundle_uid": {"requirement": "required"}
+  }
+}

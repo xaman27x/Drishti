@@ -1,0 +1,25 @@
+{
+  "caption": "Drishti Evidence Attribute Dictionary",
+  "description": "Attributes used by the Drishti evidence-preserving normalization profile.",
+  "name": "dictionary",
+  "attributes": {
+    "byte_end": {"caption": "Byte End", "description": "Exclusive end offset in immutable raw evidence.", "type": "long_t"},
+    "byte_start": {"caption": "Byte Start", "description": "Inclusive start offset in immutable raw evidence.", "type": "long_t"},
+    "certificate_sha256": {"caption": "Certificate SHA-256", "description": "SHA-256 digest of the canonical semantic conservation certificate.", "type": "string_t"},
+    "conservation_score": {"caption": "Conservation Score", "description": "Ratio of raw bytes explicitly classified by an approved parser.", "type": "float_t"},
+    "disposition": {"caption": "Byte Disposition", "description": "How a byte span was treated: mapped, structural, ignored, or unmapped.", "type": "string_t"},
+    "field_lineage_list": {"caption": "Field Lineage List", "description": "Byte-level lineage records for normalized fields and parser decisions.", "type": "field_lineage", "is_array": true},
+    "fragment_sha256": {"caption": "Fragment SHA-256", "description": "SHA-256 digest of the referenced raw byte span.", "type": "string_t"},
+    "normalization_proof": {"caption": "Normalization Proof", "description": "Evidence and parser provenance for this normalized event.", "type": "normalization_proof"},
+    "normalization_revision": {"caption": "Normalization Revision", "description": "Monotonically increasing normalization revision for the raw event.", "type": "integer_t"},
+    "parser_bundle_sha256": {"caption": "Parser Bundle SHA-256", "description": "SHA-256 digest of the approved parser bundle.", "type": "string_t"},
+    "parser_bundle_uid": {"caption": "Parser Bundle ID", "description": "Stable identifier and version of the approved parser bundle.", "type": "string_t"},
+    "parser_identity": {"caption": "Parser Identity", "description": "Identity of the deterministic parser that produced the event.", "type": "parser_identity"},
+    "raw_event_uid": {"caption": "Raw Event ID", "description": "Stable identifier of the immutable raw evidence event.", "type": "string_t"},
+    "raw_sha256": {"caption": "Raw SHA-256", "description": "SHA-256 digest of the exact original event bytes.", "type": "string_t"},
+    "rule_uid": {"caption": "Rule ID", "description": "Stable identifier of the extraction or transformation rule.", "type": "string_t"},
+    "schema_bundle_sha256": {"caption": "Schema Bundle SHA-256", "description": "SHA-256 digest of the exact compiled OCSF contract bundle.", "type": "string_t"},
+    "target_path": {"caption": "Target Path", "description": "Dot-separated path of the normalized OCSF field.", "type": "string_t"},
+    "transformation": {"caption": "Transformation", "description": "Approved deterministic transformation applied to the source bytes.", "type": "string_t"}
+  }
+}

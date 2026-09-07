@@ -1,0 +1,16 @@
+{
+  "caption": "Normalization Proof",
+  "description": "Proves which raw evidence, parser, schema, and byte decisions produced a normalized event.",
+  "extends": "object",
+  "name": "normalization_proof",
+  "attributes": {
+    "certificate_sha256": {"requirement": "required"},
+    "conservation_score": {"requirement": "required"},
+    "field_lineage_list": {"requirement": "required"},
+    "normalization_revision": {"requirement": "required"},
+    "parser_identity": {"requirement": "required"},
+    "raw_event_uid": {"requirement": "required"},
+    "raw_sha256": {"requirement": "required"},
+    "schema_bundle_sha256": {"requirement": "required"}
+  }
+}

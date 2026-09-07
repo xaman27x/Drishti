@@ -1,0 +1,13 @@
+{
+  "caption": "Evidence Preserving Normalization",
+  "description": "Adds byte-level evidence lineage and deterministic parser provenance to an OCSF event.",
+  "meta": "profile",
+  "name": "evidence_preserving",
+  "annotations": {"group": "context"},
+  "attributes": {
+    "normalization_proof": {
+      "description": "Proof linking this normalized event to immutable raw evidence.",
+      "requirement": "required"
+    }
+  }
+}
