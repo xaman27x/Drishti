@@ -1,0 +1,1 @@
+"""Certified normalized event envelopes."""
