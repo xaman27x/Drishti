@@ -1,0 +1,68 @@
+services:
+  api:
+    build: .
+    depends_on:
+      minio:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      DRISHTI_ENVIRONMENT: local
+      DRISHTI_ADAPTER_MODE: durable
+      DRISHTI_LOG_LEVEL: INFO
+      DRISHTI_MAX_EVENT_BYTES: 1048576
+      DRISHTI_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      DRISHTI_MINIO_ENDPOINT: minio:9000
+      DRISHTI_MINIO_ACCESS_KEY: drishti
+      DRISHTI_MINIO_SECRET_KEY: change-me-in-production
+      DRISHTI_MINIO_BUCKET: drishti-raw-evidence
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/live')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.12
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-10-15T17-29-55Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: drishti
+      MINIO_ROOT_PASSWORD: change-me-in-production
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  minio-data:
+  redpanda-data:
