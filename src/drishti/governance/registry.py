@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +16,14 @@ from drishti.governance.crypto import (
 )
 from drishti.governance.qualification import QualificationReport
 from drishti.parsers.models import SourceDefinitionPack
+
+if TYPE_CHECKING:
+    from drishti.trust.transparency import (
+        InclusionProof,
+        MerkleTransparencyLog,
+        SignedCheckpoint,
+        TransparencyLeaf,
+    )
 
 
 class ReviewDecision(StrEnum):
@@ -63,6 +72,7 @@ class RegistryRelease(BaseModel):
     activated_by: str
     activated_at: datetime
     supersedes_revision: int | None = None
+    shadow_report_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     release_signature: SignatureEnvelope
 
     def release_document(self) -> dict[str, object]:
@@ -80,6 +90,7 @@ class RegistryRelease(BaseModel):
             "activated_by": self.activated_by,
             "activated_at": self.activated_at.isoformat(),
             "supersedes_revision": self.supersedes_revision,
+            "shadow_report_sha256": self.shadow_report_sha256,
         }
 
     def verify(
@@ -112,14 +123,17 @@ class ParserRegistry:
         registry_signer: ArtifactSigner,
         parser_keys: PublicKeyRing,
         reviewer_keys: PublicKeyRing,
+        transparency_log: MerkleTransparencyLog | None = None,
     ) -> None:
         self._registry_signer = registry_signer
         self._parser_keys = parser_keys
         self._reviewer_keys = reviewer_keys
+        self._transparency_log = transparency_log
         self._registry_keys = PublicKeyRing()
         self._registry_keys.add_base64(registry_signer.key_id, registry_signer.public_key_base64())
         self._history: list[RegistryRelease] = []
         self._active: dict[str, int] = {}
+        self._release_leaf_indices: dict[int, int] = {}
         self._lock = asyncio.Lock()
 
     @property
@@ -133,6 +147,7 @@ class ParserRegistry:
         qualification: QualificationReport,
         approval: SignedReview,
         activated_by: str,
+        shadow_report_sha256: str | None = None,
     ) -> RegistryRelease:
         async with self._lock:
             pack = signed_pack.pack
@@ -153,6 +168,8 @@ class ParserRegistry:
             current = self.active_release(pack.source_key)
             if current is not None and pack.semver() <= current.signed_pack.pack.semver():
                 raise ValueError("activation version must increase monotonically")
+            if current is not None and shadow_report_sha256 is None:
+                raise ValueError("parser upgrades require a verified shadow report")
 
             now = datetime.now(UTC)
             revision = len(self._history) + 1
@@ -164,6 +181,7 @@ class ParserRegistry:
                 activated_by=activated_by,
                 activated_at=now,
                 supersedes_revision=(None if current is None else current.registry_revision),
+                shadow_report_sha256=shadow_report_sha256,
                 release_signature=self._registry_signer.sign_digest(
                     "0" * 64, purpose="drishti.registry-release/v1"
                 ),
@@ -184,6 +202,17 @@ class ParserRegistry:
                 raise RuntimeError("registry created an unverifiable release")
             self._history.append(release)
             self._active[pack.source_key] = revision
+            if self._transparency_log is not None:
+                leaf = self._transparency_log.append(
+                    artifact_type="parser-registry-release",
+                    artifact_sha256=release.release_signature.artifact_sha256,
+                    metadata={
+                        "registry_revision": revision,
+                        "source_key": pack.source_key,
+                        "pack_sha256": pack.sha256(),
+                    },
+                )
+                self._release_leaf_indices[revision] = leaf.index
             return release
 
     def active_release(self, source_key: str) -> RegistryRelease | None:
@@ -198,6 +227,22 @@ class ParserRegistry:
         if revision < 1 or revision > len(self._history):
             raise KeyError(f"registry revision {revision} does not exist")
         return self._history[revision - 1]
+
+    def transparency_evidence(
+        self, revision: int
+    ) -> tuple[TransparencyLeaf, InclusionProof, SignedCheckpoint]:
+        if self._transparency_log is None:
+            raise ValueError("parser registry has no transparency log")
+        try:
+            leaf_index = self._release_leaf_indices[revision]
+        except KeyError as exc:
+            raise KeyError(f"registry revision {revision} has no transparency leaf") from exc
+        leaf = self._transparency_log.leaves[leaf_index]
+        return (
+            leaf,
+            self._transparency_log.inclusion_proof(leaf_index),
+            self._transparency_log.checkpoint(),
+        )
 
     def verify_history(self) -> bool:
         latest_by_source: dict[str, int] = {}
@@ -215,4 +260,23 @@ class ParserRegistry:
             ):
                 return False
             latest_by_source[source_key] = index
-        return latest_by_source == self._active
+        if latest_by_source != self._active:
+            return False
+        if self._transparency_log is None:
+            return True
+        if len(self._release_leaf_indices) != len(self._history):
+            return False
+        for release in self._history:
+            leaf_index = self._release_leaf_indices.get(release.registry_revision)
+            if leaf_index is None:
+                return False
+            leaf = self._transparency_log.leaves[leaf_index]
+            proof = self._transparency_log.inclusion_proof(leaf_index)
+            if (
+                leaf.artifact_sha256 != release.release_signature.artifact_sha256
+                or not self._transparency_log.verify_inclusion(
+                    leaf, proof, expected_root=self._transparency_log.root_hash()
+                )
+            ):
+                return False
+        return True

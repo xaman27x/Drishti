@@ -16,6 +16,7 @@ from drishti.governance.registry import (
     SignedReview,
 )
 from drishti.parsers.models import SourceDefinitionPack
+from drishti.trust.shadow import ShadowPromotionGate, ShadowReport
 
 
 class ProposalStatus(StrEnum):
@@ -50,10 +51,12 @@ class ParserControlPlane:
         qualification_gate: QualificationGate,
         parser_signer: ArtifactSigner,
         audit_log: AppendOnlyAuditLog | None = None,
+        promotion_gate: ShadowPromotionGate | None = None,
     ) -> None:
         self._registry = registry
         self._gate = qualification_gate
         self._parser_signer = parser_signer
+        self._promotion_gate = promotion_gate or ShadowPromotionGate()
         self.audit_log = audit_log or AppendOnlyAuditLog()
         self._proposals: dict[str, ParserProposal] = {}
 
@@ -144,7 +147,13 @@ class ParserControlPlane:
         )
         return updated
 
-    async def activate(self, *, proposal_id: str, actor_id: str) -> ParserProposal:
+    async def activate(
+        self,
+        *,
+        proposal_id: str,
+        actor_id: str,
+        shadow_report: ShadowReport | None = None,
+    ) -> ParserProposal:
         proposal = self.get(proposal_id)
         if (
             proposal.status is not ProposalStatus.QUALIFIED
@@ -152,12 +161,37 @@ class ParserControlPlane:
             or proposal.qualification is None
         ):
             raise ValueError("only qualified, human-approved parser packs may be activated")
+        current = self._registry.active_release(proposal.pack.source_key)
+        shadow_report_sha256: str | None = None
+        if current is not None:
+            if shadow_report is None:
+                raise ValueError("parser upgrades require counterfactual shadow evidence")
+            if (
+                shadow_report.active_pack_sha256 != current.signed_pack.pack.sha256()
+                or shadow_report.candidate_pack_sha256 != proposal.pack.sha256()
+            ):
+                raise ValueError("shadow evidence does not match the active and candidate packs")
+            promotion = self._promotion_gate.decide(shadow_report)
+            if not promotion.accepted:
+                raise ValueError("shadow promotion rejected: " + "; ".join(promotion.reasons))
+            shadow_report_sha256 = shadow_report.report_sha256
+            self.audit_log.append(
+                event_type="parser.shadow-qualified",
+                actor_id=actor_id,
+                artifact_sha256=proposal.pack.sha256(),
+                details={
+                    "proposal_id": proposal_id,
+                    "shadow_report_sha256": shadow_report_sha256,
+                    "evaluated_events": shadow_report.total_events,
+                },
+            )
         signed_pack = SignedSourceDefinitionPack.issue(proposal.pack, signer=self._parser_signer)
         release: RegistryRelease = await self._registry.activate(
             signed_pack=signed_pack,
             qualification=proposal.qualification,
             approval=proposal.review,
             activated_by=actor_id,
+            shadow_report_sha256=shadow_report_sha256,
         )
         updated = proposal.model_copy(
             update={
@@ -173,6 +207,7 @@ class ParserControlPlane:
             details={
                 "proposal_id": proposal_id,
                 "registry_revision": release.registry_revision,
+                "shadow_report_sha256": shadow_report_sha256,
             },
         )
         return updated
