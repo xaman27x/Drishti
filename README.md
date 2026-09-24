@@ -4,7 +4,9 @@ Drishti is a lossless, vendor-neutral Universal Log Pre-processing Framework (UL
 The first two patches established archive-before-publish ingestion and a pinned, air-gapped
 OCSF 1.9.0 contract plane. Patch 3 adds the governed parser plane: local format discovery,
 human-approved Source Definition Packs, adversarial qualification, signed activation, and
-controlled replay over immutable evidence.
+controlled replay over immutable evidence. Patch 4 adds an adaptive **Trust Fabric** that detects
+format drift, proves upgrade safety against live evidence, makes releases independently auditable,
+and shares dialect intelligence across air-gapped sites without exporting raw logs.
 
 ## What works now
 
@@ -26,6 +28,10 @@ controlled replay over immutable evidence.
 - Signed, event-bounded controlled replay pinned to an exact registry revision and pack digest.
 - Durable adapters for S3-compatible raw evidence and Kafka-compatible archived-event delivery.
 - A local cluster profile using Redpanda and MinIO; core ports remain vendor-neutral.
+- Dialect DNA with online Jensen-Shannon drift detection and automatic quarantine decisions.
+- Counterfactual Shadow Twin evaluation that is mandatory for parser upgrades.
+- Merkle transparency proofs and signed offline-verifiable registry checkpoints.
+- Signed k-anonymous Sovereign Dialect Capsules for raw-free cross-site intelligence.
 
 The default process uses in-memory adapters for fast tests. `docker compose up --build` selects
 the durable profile: raw bytes are persisted to an object-lock-enabled MinIO bucket before an
@@ -51,12 +57,16 @@ Run the complete governed-parser demonstration:
 
 ```bash
 python scripts/demo_governed_parser.py
+python scripts/demo_trust_fabric.py
 ```
 
 The command detects an RFC5424 dialect locally, creates an untrusted proposal, records a signed
 human approval, runs OCSF/lineage/adversarial/latency gates, publishes a signed registry release,
 then performs a separately signed controlled replay. Its final JSON includes the registry and
 audit verification results, OCSF event, raw digest, and conservation-certificate digest.
+The Trust Fabric demo then simulates a firmware format change, evaluates a parser upgrade against
+the active parser, verifies a Merkle inclusion proof, and correlates signed capsules from two
+air-gapped sites while proving that raw IP values were not exported.
 
 `make check` also verifies the vendored OCSF source tree and the compiled bundle digest.
 No live OCSF service or internet access is used at runtime.
@@ -106,17 +116,25 @@ flowchart TD
     A[Perimeter logs] --> B[Lossless ingestion]
     B --> C[Immutable raw evidence]
     C --> D[Archived-event topic]
-    D --> E[Active deterministic parser]
+    D --> N[Dialect DNA sentinel]
+    N --> E[Active deterministic parser]
+    N --> H
     E --> F[OCSF 1.9 validation]
     F --> G[Certified normalized event]
     H[Local Schema Copilot] --> I[Untrusted SDP proposal]
     I --> J[Signed human review]
     J --> K[Adversarial qualification]
-    K --> L[Signed parser registry]
+    K --> S{Parser upgrade?}
+    S -->|No| L[Signed parser registry]
+    S -->|Yes| O[Counterfactual Shadow Twin]
+    O --> L
     L --> E
+    L --> P[Merkle transparency log]
     C --> M[Signed controlled replay]
     L --> M
     M --> G
+    N --> Q[Signed dialect capsule]
+    Q --> R[Air-gapped federation]
 ```
 
 Core code depends only on ports (`RawEvidenceStore`, `EventPublisher`). Infrastructure adapters
@@ -136,6 +154,7 @@ src/drishti/
   parsers/      deterministic RFC5424/CEF grammars and declarative mapping engine
   provenance/   byte-span lineage and conservation certificates
   replay/       signed, bounded, revision-pinned controlled replay
+  trust/        dialect drift, shadow promotion, Merkle proofs, raw-free federation
   normalization/certified normalized event envelope
 schemas/        separate Drishti OCSF extension
 third_party/    unmodified, pinned OCSF source and license
@@ -155,6 +174,10 @@ tests/          unit and API contract tests
 8. AI output is always untrusted and has no route around human approval and qualification.
 9. Source packs contain declarative data only; executable code and user regex are forbidden.
 10. Replay is bounded, independently approved, revision-pinned, idempotent, and non-destructive.
+11. A parser upgrade cannot activate without counterfactual evidence from the active dialect.
+12. Drift quarantine preserves evidence and cannot silently discard an event.
+13. Every transparency proof is independently verifiable from a signed checkpoint.
+14. Federated intelligence contains k-anonymous structural fingerprints, never raw log payloads.
 
 ## Rebuilding the OCSF bundle
 
@@ -168,5 +191,6 @@ make check
 ```
 
 See [ADR-0001](docs/decisions/0001-ocsf-contract-plane.md),
-[ADR-0002](docs/decisions/0002-governed-parser-plane.md), and
+[ADR-0002](docs/decisions/0002-governed-parser-plane.md),
+[ADR-0003](docs/decisions/0003-adaptive-trust-fabric.md), and the
 [third-party notices](THIRD_PARTY_NOTICES.md) for the versioning and licensing decision.
