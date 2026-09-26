@@ -1,49 +1,182 @@
 # Drishti
 
-Drishti is a lossless, vendor-neutral Universal Log Pre-processing Framework (ULPF).
-The first two patches established archive-before-publish ingestion and a pinned, air-gapped
-OCSF 1.9.0 contract plane. Patch 3 adds the governed parser plane: local format discovery,
-human-approved Source Definition Packs, adversarial qualification, signed activation, and
-controlled replay over immutable evidence. Patch 4 adds an adaptive **Trust Fabric** that detects
-format drift, proves upgrade safety against live evidence, makes releases independently auditable,
-and shares dialect intelligence across air-gapped sites without exporting raw logs.
+Drishti is a lossless log preprocessing framework for perimeter security devices. It receives
+logs from firewalls, VPN gateways, routers, and similar systems; preserves the exact original
+bytes; converts supported formats into OCSF events; and records enough evidence to reproduce and
+verify every normalization decision.
 
-## What works now
+The project is designed for environments where a parsing mistake is a security and forensic
+problem, not merely a malformed row. New parsers therefore cannot be activated directly by an AI
+model, a developer, or an administrator. They must pass deterministic tests, independent review,
+schema validation, byte-level traceability checks, and signed activation.
 
-- Binary-safe event ingestion over HTTP using base64 payloads.
-- SHA-256 integrity identity over the exact original bytes.
-- Idempotent ingestion with conflict detection.
-- Archive-before-publish ordering enforced by the application service.
-- In-memory adapters for a fast local vertical slice.
-- Health endpoints, typed contracts, tests, linting, CI, and a non-root container.
-- Official OCSF `1.9.0` source pinned at an immutable upstream commit.
-- Reproducible compressed OCSF bundle containing the private Drishti evidence extension.
-- Recursive validation of classes, objects, primitive types, enums, constraints, and IDs.
-- Byte-span lineage and tamper-evident semantic conservation certificates.
-- Deterministic RFC5424 and CEF parsers with no user-supplied or runtime-compiled regex.
-- Declarative Source Definition Packs (SDPs) containing mappings, fixtures, and budgets—not code.
-- Air-gapped Schema Copilot that fingerprints and proposes formats but cannot activate them.
-- Separation-of-duties workflow with signed human decisions and fail-closed qualification.
-- Ed25519-signed parser registry releases and a hash-chained governance audit trail.
-- Signed, event-bounded controlled replay pinned to an exact registry revision and pack digest.
-- Durable adapters for S3-compatible raw evidence and Kafka-compatible archived-event delivery.
-- A local cluster profile using Redpanda and MinIO; core ports remain vendor-neutral.
-- Dialect DNA with online Jensen-Shannon drift detection and automatic quarantine decisions.
-- Counterfactual Shadow Twin evaluation that is mandatory for parser upgrades.
-- Merkle transparency proofs and signed offline-verifiable registry checkpoints.
-- Signed k-anonymous Sovereign Dialect Capsules for raw-free cross-site intelligence.
+## Why Drishti exists
 
-The default process uses in-memory adapters for fast tests. `docker compose up --build` selects
-the durable profile: raw bytes are persisted to an object-lock-enabled MinIO bucket before an
-idempotent producer publishes the evidence pointer to Redpanda. Production deployments should
-replace demo credentials and apply bucket retention, TLS, replication, and external key custody.
+Security products describe the same activity in incompatible formats. Even two devices from the
+same vendor may produce different fields after a firmware or configuration change. Conventional
+pipelines usually solve this with source-specific scripts. Those scripts are difficult to audit,
+can silently discard fields, and often cannot reproduce how an old alert was normalized.
 
-OCSF is the normalized event contract—not the parser. Drishti parsers remain deterministic and
-must produce events accepted by the pinned contract before a certificate can be issued.
+Drishti treats the raw log as evidence and the normalized event as a derived view:
+
+- The original event is stored before any downstream processing occurs.
+- Every extracted value points back to its exact byte range in the original event.
+- Unmapped bytes remain visible instead of being silently discarded.
+- Every normalized event is validated against a pinned, local OCSF schema.
+- Every parser release records its definition, tests, approval, qualification report, and signer.
+- Old events can be reprocessed without overwriting earlier normalized results.
+
+## End-to-end flow
+
+```mermaid
+flowchart TD
+    A[Firewall, VPN, or router] --> B[Ingestion API]
+    B --> C[Immutable raw archive]
+    C --> D[Archived event queue]
+    D --> E{Known format?}
+    E -->|Yes| F[Approved deterministic parser]
+    E -->|No or changed| G[Local format proposal]
+    G --> H[Human review and automated tests]
+    H --> I[Signed parser registry]
+    I --> F
+    F --> J[OCSF validation and byte traceability]
+    J --> K[Certified normalized event]
+    K --> L[SIEM, data lake, or analytics]
+```
+
+### What happens to one event
+
+1. **Receive:** the API accepts the event with its source identity and idempotency key.
+2. **Identify:** Drishti computes SHA-256 over the exact received bytes.
+3. **Archive:** the raw event is written to the evidence store before a queue message is published.
+4. **Select parser:** the registry resolves an approved parser for the source and version.
+5. **Parse:** a bounded RFC5424 or CEF parser extracts fields without executing generated code.
+6. **Normalize:** declarative mapping rules create an OCSF Network Activity event.
+7. **Verify:** Drishti validates OCSF structure and checks that parser claims refer to valid,
+   non-overlapping byte ranges.
+8. **Certify:** the result records the raw digest, parser digest, schema digest, registry revision,
+   and normalization revision.
+9. **Export:** downstream systems receive the certified normalized event and can retrieve the
+   original evidence using its event ID.
+
+If parsing fails, the raw event remains archived. Drishti does not turn parser failure into data
+loss.
+
+## Main capabilities
+
+### Lossless ingestion
+
+`RawEvent` stores binary-safe payloads, source metadata, timestamps, trace IDs, and SHA-256
+integrity information. Repeating an idempotent request returns the existing event; reusing the
+same key for different bytes is rejected as a conflict.
+
+The durable deployment uses MinIO for S3-compatible evidence storage and Redpanda for
+Kafka-compatible delivery. The application enforces **archive before publish**, so downstream
+processing never receives a pointer to evidence that was not stored successfully.
+
+### OCSF normalization
+
+Drishti uses OCSF `1.9.0` as its normalized event schema. The official source is vendored at a
+pinned upstream commit and compiled with a separate Drishti evidence-preservation extension.
+Runtime validation uses the packaged bundle and requires no internet connection.
+
+OCSF defines the output contract; it is not used as a parser. Parsing remains deterministic and
+source-specific, while OCSF gives every successful result a consistent structure for SIEM,
+analytics, and machine-learning consumers.
+
+### Declarative parser definitions
+
+A Source Definition Pack describes:
+
+- the allowed grammar, such as RFC5424 or CEF;
+- source identification rules;
+- source-to-OCSF field mappings;
+- test fixtures and expected values;
+- payload and latency limits; and
+- the pack identity and semantic version.
+
+Packs are data, not executable plugins. They cannot contain Python, shell commands, WASM,
+network calls, imports, templates, or user-supplied regular expressions. New grammar
+implementations still require normal source-code review.
+
+### Governed parser onboarding
+
+The local Schema Copilot can inspect samples and draft a Source Definition Pack. Its output is
+always an untrusted proposal. The activation path is deliberately separate:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Proposed
+    Proposed --> Rejected: reviewer rejects
+    Proposed --> Approved: independent approval
+    Approved --> Failed: qualification fails
+    Approved --> Qualified: all checks pass
+    Qualified --> Active: signed activation
+    Active --> [*]
+```
+
+Qualification checks golden fixtures, malformed and truncated inputs, NUL injection, payload
+limits, latency budgets, OCSF validity, and byte conservation. A proposer cannot approve their
+own pack. Successful releases are signed with Ed25519 and kept in an immutable registry history.
+
+### Controlled replay
+
+Controlled replay safely processes selected archived events with a specific approved parser
+version. A signed replay request fixes:
+
+- the exact event IDs;
+- source and parser-pack digest;
+- parser-registry revision;
+- normalization revision;
+- requester, independent approver, and reason; and
+- maximum event count.
+
+Replay writes a new revision of the normalized output. It never modifies raw evidence and never
+replaces the result produced by an earlier parser version. Deterministic output identifiers make
+retries safe.
+
+## Safety features for changing log formats
+
+These features strengthen the core pipeline; they do not replace it.
+
+### 1. Privacy-safe format change detection
+
+Drishti learns the structure normally produced by each source. It replaces values with broad
+character classes and computes a keyed fingerprint, so IP addresses, usernames, hostnames, and
+messages are not retained in the detector. A bounded statistical comparison identifies large
+structural changes, such as a firmware update switching a device from RFC5424 to CEF.
+
+Stable events continue to the active parser. Suspicious changes can be mirrored for review or
+quarantined while their original bytes remain safe in the evidence archive.
+
+### 2. Side-by-side parser comparison
+
+Before an existing parser is upgraded, Drishti runs the active and proposed versions against the
+same immutable raw events. It blocks activation when the proposed parser:
+
+- fails on events accepted by the active version;
+- changes critical fields such as time, severity, source IP, or destination IP;
+- reduces byte coverage; or
+- has not been tested on the configured minimum number of events.
+
+The comparison report is content-addressed and attached to the signed parser release.
+
+### 3. Verifiable parser release history
+
+Parser releases are added to an append-only Merkle history. An auditor can verify a release's
+inclusion using a compact proof and signed checkpoint, even on an offline machine. This makes
+silent removal or substitution of a release detectable.
+
+### 4. Privacy-safe format sharing
+
+Separate or air-gapped installations can exchange signed summaries of observed log structures
+without exchanging raw logs. Rare patterns are suppressed below a configurable k-anonymity
+threshold. Shared summaries can indicate that another site has already observed a format, but
+they cannot activate a parser or bypass local approval.
 
 ## Quick start
 
-Requires Python 3.11+.
+Drishti requires Python 3.11 or newer.
 
 ```bash
 python -m venv .venv
@@ -53,25 +186,34 @@ make check
 make run
 ```
 
-Run the complete governed-parser demonstration:
+The API starts on `http://localhost:8080`. Interactive API documentation is available at
+`http://localhost:8080/docs`.
+
+### Run the demonstrations
 
 ```bash
 python scripts/demo_governed_parser.py
-python scripts/demo_trust_fabric.py
+python scripts/demo_parser_safety.py
 ```
 
-The command detects an RFC5424 dialect locally, creates an untrusted proposal, records a signed
-human approval, runs OCSF/lineage/adversarial/latency gates, publishes a signed registry release,
-then performs a separately signed controlled replay. Its final JSON includes the registry and
-audit verification results, OCSF event, raw digest, and conservation-certificate digest.
-The Trust Fabric demo then simulates a firmware format change, evaluates a parser upgrade against
-the active parser, verifies a Merkle inclusion proof, and correlates signed capsules from two
-air-gapped sites while proving that raw IP values were not exported.
+The first demonstration covers local format discovery, human approval, qualification, signed
+activation, OCSF normalization, byte traceability, and controlled replay. The second demonstrates
+format-change detection, side-by-side parser comparison, release-history verification, and
+privacy-safe sharing between two sites.
 
-`make check` also verifies the vendored OCSF source tree and the compiled bundle digest.
-No live OCSF service or internet access is used at runtime.
+### Start the durable local deployment
 
-Ingest an event:
+```bash
+docker compose up --build
+```
+
+This starts Drishti with Redpanda and MinIO. The supplied credentials and single-node services are
+for local evaluation. Production deployments must provide TLS, secrets management, replication,
+retention policies, backups, and external signing-key custody.
+
+## API examples
+
+### Ingest an event
 
 ```bash
 curl -X POST http://localhost:8080/v1/events \
@@ -85,11 +227,11 @@ curl -X POST http://localhost:8080/v1/events \
   }'
 ```
 
-The API returns `202 Accepted` with an event ID, trace ID, and raw SHA-256 digest. Repeating the
-same request returns the same event ID with `duplicate: true`. Reusing the same idempotency key
-for different bytes returns `409 Conflict`.
+A successful request returns `202 Accepted` with an event ID, trace ID, and raw SHA-256 digest.
+Repeating the same request returns the same event ID with `duplicate: true`. Sending different
+bytes with the same idempotency key returns `409 Conflict`.
 
-Validate a candidate OCSF Network Activity event:
+### Validate an OCSF event
 
 ```bash
 curl -X POST http://localhost:8080/v1/ocsf/validate \
@@ -106,83 +248,55 @@ curl -X POST http://localhost:8080/v1/ocsf/validate \
   }}'
 ```
 
-The response includes `valid`, the resolved class, structured issues, and the exact schema-bundle
-digest used for the decision.
+The response reports whether the event is valid, the resolved OCSF class, structured validation
+issues, and the exact schema-bundle digest used for the decision.
 
-## Governed architecture
-
-```mermaid
-flowchart TD
-    A[Perimeter logs] --> B[Lossless ingestion]
-    B --> C[Immutable raw evidence]
-    C --> D[Archived-event topic]
-    D --> N[Dialect DNA sentinel]
-    N --> E[Active deterministic parser]
-    N --> H
-    E --> F[OCSF 1.9 validation]
-    F --> G[Certified normalized event]
-    H[Local Schema Copilot] --> I[Untrusted SDP proposal]
-    I --> J[Signed human review]
-    J --> K[Adversarial qualification]
-    K --> S{Parser upgrade?}
-    S -->|No| L[Signed parser registry]
-    S -->|Yes| O[Counterfactual Shadow Twin]
-    O --> L
-    L --> E
-    L --> P[Merkle transparency log]
-    C --> M[Signed controlled replay]
-    L --> M
-    M --> G
-    N --> Q[Signed dialect capsule]
-    Q --> R[Air-gapped federation]
-```
-
-Core code depends only on ports (`RawEvidenceStore`, `EventPublisher`). Infrastructure adapters
-will remain replaceable so Drishti can run on a laptop, Kubernetes, or an air-gapped cluster.
-
-## Repository map
+## Repository layout
 
 ```text
 src/drishti/
-  api/          FastAPI transport and schemas
-  domain/       immutable event model and invariants
-  pipeline/     use cases and infrastructure ports
-  adapters/     replaceable in-memory implementations
-  copilot/      air-gapped grammar discovery and untrusted SDP proposals
-  governance/   signatures, approvals, qualification, audit, parser registry
-  ocsf/         pinned contract loader and recursive validator
-  parsers/      deterministic RFC5424/CEF grammars and declarative mapping engine
-  provenance/   byte-span lineage and conservation certificates
-  replay/       signed, bounded, revision-pinned controlled replay
-  trust/        dialect drift, shadow promotion, Merkle proofs, raw-free federation
-  normalization/certified normalized event envelope
-schemas/        separate Drishti OCSF extension
-third_party/    unmodified, pinned OCSF source and license
-scripts/        reproducible bundle build and integrity verification
-tests/          unit and API contract tests
+  adapters/       MinIO, Kafka, and in-memory infrastructure implementations
+  api/            FastAPI application and request/response models
+  copilot/        local format discovery and untrusted parser proposals
+  domain/         immutable raw-event model
+  governance/     signing, review, qualification, audit, and parser registry
+  normalization/  certified normalized-event envelope
+  ocsf/           packaged schema loader and recursive validator
+  parsers/        RFC5424/CEF parsing and declarative mapping engine
+  pipeline/       ingestion use cases and infrastructure interfaces
+  provenance/     byte ranges and conservation certificates
+  replay/         signed, bounded controlled replay
+  safety/         format detection, parser comparison, and release verification
+schemas/          Drishti's separate OCSF extension
+scripts/          demonstrations and reproducible OCSF build checks
+tests/            unit, integration, contract, and adversarial tests
+third_party/      pinned OCSF source and licensing material
 ```
 
-## Non-negotiable invariants
+## Security and correctness rules
 
-1. Original bytes are never mutated.
-2. Raw evidence is durably archived before downstream publication.
-3. A stable idempotency key cannot point to two different payloads.
-4. Every downstream event carries the raw event ID and SHA-256 digest.
-5. No normalized event is certified unless it passes the pinned OCSF contract.
-6. Every parser claim references exact, non-overlapping raw byte spans.
-7. Schema and parser identities are content-addressed, never inferred from `latest`.
-8. AI output is always untrusted and has no route around human approval and qualification.
-9. Source packs contain declarative data only; executable code and user regex are forbidden.
-10. Replay is bounded, independently approved, revision-pinned, idempotent, and non-destructive.
-11. A parser upgrade cannot activate without counterfactual evidence from the active dialect.
-12. Drift quarantine preserves evidence and cannot silently discard an event.
-13. Every transparency proof is independently verifiable from a signed checkpoint.
-14. Federated intelligence contains k-anonymous structural fingerprints, never raw log payloads.
+The implementation is organized around these invariants:
+
+1. Original event bytes are never mutated.
+2. Raw evidence is archived before downstream publication.
+3. One idempotency key cannot identify two different payloads.
+4. Every derived event identifies its raw event and SHA-256 digest.
+5. Normalized events must pass the pinned OCSF contract before certification.
+6. Parser field claims must reference valid, non-overlapping raw byte ranges.
+7. Parser and schema versions are content-addressed; processing never follows an unpinned
+   `latest` reference.
+8. AI-generated proposals have no activation authority.
+9. Source Definition Packs contain declarative data rather than executable code.
+10. Parser approval, qualification, activation, and replay are auditable and signed.
+11. Parser upgrades require a successful side-by-side comparison.
+12. Format quarantine preserves evidence and never silently drops an event.
+13. Parser release proofs can be verified from a signed offline checkpoint.
+14. Cross-site format summaries contain no raw log payloads.
 
 ## Rebuilding the OCSF bundle
 
-The committed bundle is the runtime artifact. Rebuild it only after an intentional schema or
-extension change:
+The compiled OCSF bundle is committed as a runtime artifact. Rebuild it only after an intentional
+schema or Drishti-extension change:
 
 ```bash
 make build-ocsf
@@ -190,7 +304,22 @@ make verify-ocsf
 make check
 ```
 
-See [ADR-0001](docs/decisions/0001-ocsf-contract-plane.md),
-[ADR-0002](docs/decisions/0002-governed-parser-plane.md),
-[ADR-0003](docs/decisions/0003-adaptive-trust-fabric.md), and the
-[third-party notices](THIRD_PARTY_NOTICES.md) for the versioning and licensing decision.
+`make check` verifies both the vendored OCSF source tree and the compiled bundle digest. Runtime
+operation does not contact an OCSF service or require internet access.
+
+## Current scope
+
+The current parser surface covers deterministic RFC5424 and CEF perimeter-device events and maps
+them to OCSF Network Activity. The architecture supports additional source packs, but a new wire
+grammar still requires implementation and review. The local Schema Copilot is a constrained
+proposal generator, not a general model that can understand every proprietary binary protocol.
+
+This distinction is intentional: Drishti aims to make onboarding faster without claiming that an
+unknown format can be safely normalized without evidence, testing, or human judgment.
+
+## Design decisions and licenses
+
+- [OCSF schema decision](docs/decisions/ocsf-schema.md)
+- [Parser governance decision](docs/decisions/parser-governance.md)
+- [Parser safety decision](docs/decisions/parser-safety.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
