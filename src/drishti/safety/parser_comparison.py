@@ -36,8 +36,8 @@ class SemanticDelta(BaseModel):
     candidate_conservation_score: float | None = None
 
 
-class ShadowReport(BaseModel):
-    """Counterfactual result of running active and candidate packs on identical evidence."""
+class ParserComparisonReport(BaseModel):
+    """Result of running active and candidate parsers on identical raw events."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -60,7 +60,7 @@ class ShadowReport(BaseModel):
         return self.report_sha256 == sha256_json(self.unsigned_document())
 
 
-class ShadowEvaluator:
+class ParserComparator:
     def __init__(
         self,
         catalog: OcsfCatalog,
@@ -76,11 +76,11 @@ class ShadowEvaluator:
         active_pack: SourceDefinitionPack,
         candidate_pack: SourceDefinitionPack,
         events: list[RawEvent],
-    ) -> ShadowReport:
+    ) -> ParserComparisonReport:
         if not events:
-            raise ValueError("shadow evaluation requires at least one raw event")
+            raise ValueError("parser comparison requires at least one raw event")
         if active_pack.source_key != candidate_pack.source_key:
-            raise ValueError("shadow packs must target the same source key")
+            raise ValueError("compared parsers must target the same source key")
         deltas = tuple(
             self._evaluate_event(
                 event=event,
@@ -97,7 +97,7 @@ class ShadowEvaluator:
             for delta in deltas
             if delta.candidate_conservation_score is not None
         ]
-        provisional = ShadowReport(
+        provisional = ParserComparisonReport(
             source_key=active_pack.source_key,
             active_pack_sha256=active_pack.sha256(),
             candidate_pack_sha256=candidate_pack.sha256(),
@@ -199,17 +199,17 @@ class PromotionDecision(BaseModel):
 
     accepted: bool
     reasons: tuple[str, ...]
-    shadow_report_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    comparison_report_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
-class ShadowPromotionGate:
+class ParserPromotionGate:
     def __init__(self, policy: PromotionPolicy | None = None) -> None:
         self.policy = policy or PromotionPolicy()
 
-    def decide(self, report: ShadowReport) -> PromotionDecision:
+    def decide(self, report: ParserComparisonReport) -> PromotionDecision:
         reasons: list[str] = []
         if not report.verify():
-            reasons.append("shadow report integrity verification failed")
+            reasons.append("parser comparison report integrity verification failed")
         if report.total_events < self.policy.minimum_events:
             reasons.append(
                 f"requires {self.policy.minimum_events} events; received {report.total_events}"
@@ -223,5 +223,5 @@ class ShadowPromotionGate:
         return PromotionDecision(
             accepted=not reasons,
             reasons=tuple(reasons),
-            shadow_report_sha256=report.report_sha256,
+            comparison_report_sha256=report.report_sha256,
         )

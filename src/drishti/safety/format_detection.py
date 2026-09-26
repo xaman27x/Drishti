@@ -22,29 +22,29 @@ FEATURE_NAMES = (
 )
 
 
-class DialectFingerprint(BaseModel):
+class FormatFingerprint(BaseModel):
     """Privacy-preserving structural identity; it contains no log values."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    dna_version: str = "drishti.dialect-dna/v1"
+    fingerprint_version: str = "drishti.format-fingerprint/v1"
     source_key: str
     fingerprint_hmac: str = Field(pattern=r"^[a-f0-9]{64}$")
     features: tuple[int, ...] = Field(min_length=len(FEATURE_NAMES), max_length=len(FEATURE_NAMES))
 
 
-class DialectFingerprinter:
+class FormatFingerprinter:
     """Produces comparable HMAC fingerprints over value-redacted byte shapes."""
 
-    def __init__(self, federation_key: bytes) -> None:
-        if len(federation_key) < 16:
-            raise ValueError("dialect federation key must contain at least 128 bits")
-        self._key = federation_key
+    def __init__(self, sharing_key: bytes) -> None:
+        if len(sharing_key) < 16:
+            raise ValueError("format-sharing key must contain at least 128 bits")
+        self._key = sharing_key
 
-    def fingerprint(self, *, source_key: str, raw: bytes) -> DialectFingerprint:
+    def fingerprint(self, *, source_key: str, raw: bytes) -> FormatFingerprint:
         shape = self._shape(raw)
         digest = hmac.new(self._key, shape, hashlib.sha256).hexdigest()
-        return DialectFingerprint(
+        return FormatFingerprint(
             source_key=source_key,
             fingerprint_hmac=digest,
             features=self.feature_vector(raw),
@@ -112,7 +112,7 @@ class DriftDecision(BaseModel):
     source_key: str
     observed_at: datetime
     status: DriftStatus
-    fingerprint: DialectFingerprint
+    fingerprint: FormatFingerprint
     js_divergence: float = Field(ge=0, le=1)
     feature_distance: float = Field(ge=0)
     baseline_events: int = Field(ge=0)
@@ -120,14 +120,14 @@ class DriftDecision(BaseModel):
     reason: str
 
 
-class DialectDriftSentinel:
-    """Online, distribution-free drift detector over structural log DNA."""
+class FormatChangeDetector:
+    """Detects structural changes in a source's log format without retaining values."""
 
     def __init__(
         self,
         *,
         source_key: str,
-        fingerprinter: DialectFingerprinter,
+        fingerprinter: FormatFingerprinter,
         baseline_size: int = 32,
         window_size: int = 16,
         warning_jsd: float = 0.25,
@@ -147,8 +147,8 @@ class DialectDriftSentinel:
         self._quarantine_jsd = quarantine_jsd
         self._warning_feature_distance = warning_feature_distance
         self._quarantine_feature_distance = quarantine_feature_distance
-        self._baseline: list[DialectFingerprint] = []
-        self._window: deque[DialectFingerprint] = deque(maxlen=window_size)
+        self._baseline: list[FormatFingerprint] = []
+        self._window: deque[FormatFingerprint] = deque(maxlen=window_size)
 
     def observe(self, *, event_id: UUID, raw: bytes) -> DriftDecision:
         fingerprint = self._fingerprinter.fingerprint(source_key=self.source_key, raw=raw)
@@ -171,13 +171,13 @@ class DialectDriftSentinel:
             reason = f"filling observation window ({len(self._window)}/{self._window_size})"
         elif jsd >= self._quarantine_jsd or distance >= self._quarantine_feature_distance:
             status = DriftStatus.QUARANTINE
-            reason = "structural dialect shift exceeds the quarantine boundary"
+            reason = "log format change exceeds the quarantine threshold"
         elif jsd >= self._warning_jsd or distance >= self._warning_feature_distance:
             status = DriftStatus.WARNING
-            reason = "structural dialect shift requires operator review"
+            reason = "log format change requires operator review"
         else:
             status = DriftStatus.STABLE
-            reason = "observation remains inside the trusted dialect envelope"
+            reason = "log format remains within the learned baseline"
         return self._decision(
             event_id=event_id,
             fingerprint=fingerprint,
@@ -191,7 +191,7 @@ class DialectDriftSentinel:
         self,
         *,
         event_id: UUID,
-        fingerprint: DialectFingerprint,
+        fingerprint: FormatFingerprint,
         status: DriftStatus,
         jsd: float,
         distance: float,
@@ -212,7 +212,7 @@ class DialectDriftSentinel:
 
     @staticmethod
     def _jensen_shannon(
-        baseline: list[DialectFingerprint], window: list[DialectFingerprint]
+        baseline: list[FormatFingerprint], window: list[FormatFingerprint]
     ) -> float:
         if not baseline or not window:
             return 0.0
@@ -234,12 +234,12 @@ class DialectDriftSentinel:
 
     @staticmethod
     def _feature_distance(
-        baseline: list[DialectFingerprint], window: list[DialectFingerprint]
+        baseline: list[FormatFingerprint], window: list[FormatFingerprint]
     ) -> float:
         if not baseline or not window:
             return 0.0
 
-        def centroid(values: list[DialectFingerprint]) -> tuple[float, ...]:
+        def centroid(values: list[FormatFingerprint]) -> tuple[float, ...]:
             return tuple(
                 sum(item.features[index] for item in values) / len(values)
                 for index in range(len(FEATURE_NAMES))

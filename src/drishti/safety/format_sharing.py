@@ -13,23 +13,23 @@ from drishti.governance.crypto import (
     SignatureEnvelope,
     sha256_json,
 )
-from drishti.trust.dialect import FEATURE_NAMES, DialectFingerprinter
+from drishti.safety.format_detection import FEATURE_NAMES, FormatFingerprinter
 
 
-class CapsuleFingerprintBin(BaseModel):
+class FormatCount(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     fingerprint_hmac: str = Field(pattern=r"^[a-f0-9]{64}$")
     event_count: int = Field(ge=1)
 
 
-class DialectCapsule(BaseModel):
-    """Signed, k-anonymous structural intelligence with no raw log content."""
+class SharedFormatSummary(BaseModel):
+    """Signed, k-anonymous format summary containing no raw log content."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    capsule_id: UUID
-    capsule_version: str = "drishti.dialect-capsule/v1"
+    summary_id: UUID
+    summary_version: str = "drishti.shared-format-summary/v1"
     site_pseudonym: str = Field(min_length=8, max_length=128)
     source_family: str = Field(min_length=1, max_length=128)
     window_start: datetime
@@ -40,44 +40,44 @@ class DialectCapsule(BaseModel):
     feature_centroid: tuple[float, ...] = Field(
         min_length=len(FEATURE_NAMES), max_length=len(FEATURE_NAMES)
     )
-    fingerprint_bins: tuple[CapsuleFingerprintBin, ...]
+    fingerprint_bins: tuple[FormatCount, ...]
     signer_key_id: str
     signature: SignatureEnvelope
 
     @model_validator(mode="after")
-    def validate_capsule(self) -> DialectCapsule:
+    def validate_summary(self) -> SharedFormatSummary:
         if self.window_start.tzinfo is None or self.window_end.tzinfo is None:
-            raise ValueError("capsule windows must be timezone-aware")
+            raise ValueError("summary windows must be timezone-aware")
         if self.window_end <= self.window_start:
-            raise ValueError("capsule window end must follow its start")
+            raise ValueError("summary window end must follow its start")
         represented = sum(item.event_count for item in self.fingerprint_bins)
         if represented + self.suppressed_events != self.event_count:
-            raise ValueError("capsule event accounting is inconsistent")
+            raise ValueError("summary event accounting is inconsistent")
         if any(item.event_count < self.k_anonymity for item in self.fingerprint_bins):
-            raise ValueError("capsule contains a fingerprint below its k-anonymity threshold")
+            raise ValueError("summary contains a fingerprint below its k-anonymity threshold")
         return self
 
-    def capsule_document(self) -> dict[str, Any]:
+    def summary_document(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"signature"})
 
     def verify(self, keyring: PublicKeyRing) -> bool:
         return (
             self.signature.key_id == self.signer_key_id
-            and self.signature.artifact_sha256 == sha256_json(self.capsule_document())
-            and keyring.verify(self.signature, purpose="drishti.dialect-capsule/v1")
+            and self.signature.artifact_sha256 == sha256_json(self.summary_document())
+            and keyring.verify(self.signature, purpose="drishti.shared-format-summary/v1")
         )
 
 
-class DialectCapsuleBuilder:
+class FormatSummaryBuilder:
     def __init__(
         self,
         *,
-        fingerprinter: DialectFingerprinter,
+        fingerprinter: FormatFingerprinter,
         signer: ArtifactSigner,
         k_anonymity: int = 8,
     ) -> None:
         if k_anonymity < 2:
-            raise ValueError("federation capsules require k-anonymity of at least 2")
+            raise ValueError("shared summaries require k-anonymity of at least 2")
         self._fingerprinter = fingerprinter
         self._signer = signer
         self._k = k_anonymity
@@ -90,16 +90,16 @@ class DialectCapsuleBuilder:
         window_start: datetime,
         window_end: datetime,
         samples: list[bytes],
-    ) -> DialectCapsule:
+    ) -> SharedFormatSummary:
         if len(samples) < self._k:
-            raise ValueError("not enough events to satisfy capsule k-anonymity")
+            raise ValueError("not enough events to satisfy summary k-anonymity")
         fingerprints = [
             self._fingerprinter.fingerprint(source_key=source_family, raw=sample)
             for sample in samples
         ]
         counts = Counter(item.fingerprint_hmac for item in fingerprints)
         bins = tuple(
-            CapsuleFingerprintBin(fingerprint_hmac=digest, event_count=count)
+            FormatCount(fingerprint_hmac=digest, event_count=count)
             for digest, count in sorted(counts.items())
             if count >= self._k
         )
@@ -111,8 +111,8 @@ class DialectCapsuleBuilder:
             )
             for index in range(len(FEATURE_NAMES))
         )
-        provisional = DialectCapsule(
-            capsule_id=uuid4(),
+        provisional = SharedFormatSummary(
+            summary_id=uuid4(),
             site_pseudonym=site_pseudonym,
             source_family=source_family,
             window_start=window_start,
@@ -123,69 +123,73 @@ class DialectCapsuleBuilder:
             feature_centroid=centroid,
             fingerprint_bins=bins,
             signer_key_id=self._signer.key_id,
-            signature=self._signer.sign_digest("0" * 64, purpose="drishti.dialect-capsule/v1"),
+            signature=self._signer.sign_digest(
+                "0" * 64, purpose="drishti.shared-format-summary/v1"
+            ),
         )
         return provisional.model_copy(
             update={
                 "signature": self._signer.sign_digest(
-                    sha256_json(provisional.capsule_document()),
-                    purpose="drishti.dialect-capsule/v1",
+                    sha256_json(provisional.summary_document()),
+                    purpose="drishti.shared-format-summary/v1",
                 )
             }
         )
 
 
-class FederatedInsight(BaseModel):
+class SharedFormatMatch(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    capsule_id: UUID
-    closest_capsule_id: UUID | None
+    summary_id: UUID
+    closest_summary_id: UUID | None
     structural_similarity: float = Field(ge=0, le=1)
-    novel_dialect: bool
+    unknown_format: bool
     participating_sites: int = Field(ge=1)
 
 
-class FederationAggregator:
-    """Correlates signed capsules without receiving source log payloads."""
+class FormatSummaryMatcher:
+    """Compares signed format summaries without receiving source log payloads."""
 
     def __init__(self, trusted_sites: PublicKeyRing, *, novelty_threshold: float = 0.5) -> None:
         if not 0 < novelty_threshold <= 1:
             raise ValueError("novelty threshold must be between zero and one")
         self._trusted_sites = trusted_sites
         self._novelty_threshold = novelty_threshold
-        self._capsules: dict[UUID, DialectCapsule] = {}
+        self._summaries: dict[UUID, SharedFormatSummary] = {}
 
-    def ingest(self, capsule: DialectCapsule) -> FederatedInsight:
-        if not capsule.verify(self._trusted_sites):
-            raise ValueError("capsule signature is invalid or its site is untrusted")
-        if capsule.capsule_id in self._capsules:
-            raise ValueError("capsule has already been ingested")
+    def ingest(self, summary: SharedFormatSummary) -> SharedFormatMatch:
+        if not summary.verify(self._trusted_sites):
+            raise ValueError("summary signature is invalid or its site is untrusted")
+        if summary.summary_id in self._summaries:
+            raise ValueError("summary has already been ingested")
         candidates = [
-            item for item in self._capsules.values() if item.source_family == capsule.source_family
+            item
+            for item in self._summaries.values()
+            if item.source_family == summary.source_family
         ]
-        closest: DialectCapsule | None = None
+        closest: SharedFormatSummary | None = None
         similarity = 0.0
         for candidate in candidates:
-            score = self._weighted_jaccard(capsule, candidate)
+            score = self._weighted_jaccard(summary, candidate)
             if closest is None or score > similarity:
                 closest = candidate
                 similarity = score
-        self._capsules[capsule.capsule_id] = capsule
+        self._summaries[summary.summary_id] = summary
         sites = {
             item.site_pseudonym
-            for item in self._capsules.values()
-            if item.source_family == capsule.source_family
+            for item in self._summaries.values()
+            if item.source_family == summary.source_family
         }
-        return FederatedInsight(
-            capsule_id=capsule.capsule_id,
-            closest_capsule_id=None if closest is None else closest.capsule_id,
+        return SharedFormatMatch(
+            summary_id=summary.summary_id,
+            closest_summary_id=None if closest is None else closest.summary_id,
             structural_similarity=round(similarity, 6),
-            novel_dialect=closest is None or similarity < self._novelty_threshold,
+            unknown_format=closest is None or similarity < self._novelty_threshold,
             participating_sites=len(sites),
         )
 
     @staticmethod
-    def _weighted_jaccard(left: DialectCapsule, right: DialectCapsule) -> float:
+    def _weighted_jaccard(left: SharedFormatSummary, right: SharedFormatSummary) -> float:
         left_counts = {item.fingerprint_hmac: item.event_count for item in left.fingerprint_bins}
         right_counts = {item.fingerprint_hmac: item.event_count for item in right.fingerprint_bins}
         keys = set(left_counts) | set(right_counts)

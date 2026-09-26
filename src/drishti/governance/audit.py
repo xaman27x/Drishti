@@ -33,7 +33,7 @@ class AppendOnlyAuditLog:
     """In-memory reference ledger with cryptographic link verification.
 
     The storage adapter can later persist the same immutable entries in a WORM
-    bucket or transparency log without changing governance semantics.
+    bucket or verifiable release history without changing governance semantics.
     """
 
     def __init__(self) -> None:

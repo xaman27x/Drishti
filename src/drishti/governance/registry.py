@@ -18,11 +18,11 @@ from drishti.governance.qualification import QualificationReport
 from drishti.parsers.models import SourceDefinitionPack
 
 if TYPE_CHECKING:
-    from drishti.trust.transparency import (
+    from drishti.safety.release_history import (
         InclusionProof,
-        MerkleTransparencyLog,
-        SignedCheckpoint,
-        TransparencyLeaf,
+        ReleaseHistory,
+        ReleaseRecord,
+        SignedHistoryCheckpoint,
     )
 
 
@@ -72,7 +72,7 @@ class RegistryRelease(BaseModel):
     activated_by: str
     activated_at: datetime
     supersedes_revision: int | None = None
-    shadow_report_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    comparison_report_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     release_signature: SignatureEnvelope
 
     def release_document(self) -> dict[str, object]:
@@ -90,7 +90,7 @@ class RegistryRelease(BaseModel):
             "activated_by": self.activated_by,
             "activated_at": self.activated_at.isoformat(),
             "supersedes_revision": self.supersedes_revision,
-            "shadow_report_sha256": self.shadow_report_sha256,
+            "comparison_report_sha256": self.comparison_report_sha256,
         }
 
     def verify(
@@ -123,12 +123,12 @@ class ParserRegistry:
         registry_signer: ArtifactSigner,
         parser_keys: PublicKeyRing,
         reviewer_keys: PublicKeyRing,
-        transparency_log: MerkleTransparencyLog | None = None,
+        release_history: ReleaseHistory | None = None,
     ) -> None:
         self._registry_signer = registry_signer
         self._parser_keys = parser_keys
         self._reviewer_keys = reviewer_keys
-        self._transparency_log = transparency_log
+        self._release_history = release_history
         self._registry_keys = PublicKeyRing()
         self._registry_keys.add_base64(registry_signer.key_id, registry_signer.public_key_base64())
         self._history: list[RegistryRelease] = []
@@ -147,7 +147,7 @@ class ParserRegistry:
         qualification: QualificationReport,
         approval: SignedReview,
         activated_by: str,
-        shadow_report_sha256: str | None = None,
+        comparison_report_sha256: str | None = None,
     ) -> RegistryRelease:
         async with self._lock:
             pack = signed_pack.pack
@@ -168,8 +168,8 @@ class ParserRegistry:
             current = self.active_release(pack.source_key)
             if current is not None and pack.semver() <= current.signed_pack.pack.semver():
                 raise ValueError("activation version must increase monotonically")
-            if current is not None and shadow_report_sha256 is None:
-                raise ValueError("parser upgrades require a verified shadow report")
+            if current is not None and comparison_report_sha256 is None:
+                raise ValueError("parser upgrades require a verified comparison report")
 
             now = datetime.now(UTC)
             revision = len(self._history) + 1
@@ -181,7 +181,7 @@ class ParserRegistry:
                 activated_by=activated_by,
                 activated_at=now,
                 supersedes_revision=(None if current is None else current.registry_revision),
-                shadow_report_sha256=shadow_report_sha256,
+                comparison_report_sha256=comparison_report_sha256,
                 release_signature=self._registry_signer.sign_digest(
                     "0" * 64, purpose="drishti.registry-release/v1"
                 ),
@@ -202,8 +202,8 @@ class ParserRegistry:
                 raise RuntimeError("registry created an unverifiable release")
             self._history.append(release)
             self._active[pack.source_key] = revision
-            if self._transparency_log is not None:
-                leaf = self._transparency_log.append(
+            if self._release_history is not None:
+                leaf = self._release_history.append(
                     artifact_type="parser-registry-release",
                     artifact_sha256=release.release_signature.artifact_sha256,
                     metadata={
@@ -228,20 +228,20 @@ class ParserRegistry:
             raise KeyError(f"registry revision {revision} does not exist")
         return self._history[revision - 1]
 
-    def transparency_evidence(
+    def release_evidence(
         self, revision: int
-    ) -> tuple[TransparencyLeaf, InclusionProof, SignedCheckpoint]:
-        if self._transparency_log is None:
-            raise ValueError("parser registry has no transparency log")
+    ) -> tuple[ReleaseRecord, InclusionProof, SignedHistoryCheckpoint]:
+        if self._release_history is None:
+            raise ValueError("parser registry has no verifiable release history")
         try:
             leaf_index = self._release_leaf_indices[revision]
         except KeyError as exc:
-            raise KeyError(f"registry revision {revision} has no transparency leaf") from exc
-        leaf = self._transparency_log.leaves[leaf_index]
+            raise KeyError(f"registry revision {revision} has no release record") from exc
+        leaf = self._release_history.leaves[leaf_index]
         return (
             leaf,
-            self._transparency_log.inclusion_proof(leaf_index),
-            self._transparency_log.checkpoint(),
+            self._release_history.inclusion_proof(leaf_index),
+            self._release_history.checkpoint(),
         )
 
     def verify_history(self) -> bool:
@@ -262,7 +262,7 @@ class ParserRegistry:
             latest_by_source[source_key] = index
         if latest_by_source != self._active:
             return False
-        if self._transparency_log is None:
+        if self._release_history is None:
             return True
         if len(self._release_leaf_indices) != len(self._history):
             return False
@@ -270,12 +270,12 @@ class ParserRegistry:
             leaf_index = self._release_leaf_indices.get(release.registry_revision)
             if leaf_index is None:
                 return False
-            leaf = self._transparency_log.leaves[leaf_index]
-            proof = self._transparency_log.inclusion_proof(leaf_index)
+            leaf = self._release_history.leaves[leaf_index]
+            proof = self._release_history.inclusion_proof(leaf_index)
             if (
                 leaf.artifact_sha256 != release.release_signature.artifact_sha256
-                or not self._transparency_log.verify_inclusion(
-                    leaf, proof, expected_root=self._transparency_log.root_hash()
+                or not self._release_history.verify_inclusion(
+                    leaf, proof, expected_root=self._release_history.root_hash()
                 )
             ):
                 return False

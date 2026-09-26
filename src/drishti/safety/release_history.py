@@ -24,7 +24,7 @@ def _node_hash(left: str, right: str) -> str:
     return hashlib.sha256(b"\x01" + bytes.fromhex(left) + bytes.fromhex(right)).hexdigest()
 
 
-class TransparencyLeaf(BaseModel):
+class ReleaseRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     index: int = Field(ge=0)
@@ -61,7 +61,7 @@ class InclusionProof(BaseModel):
     audit_path: tuple[MerkleProofNode, ...]
 
 
-class SignedCheckpoint(BaseModel):
+class SignedHistoryCheckpoint(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     log_id: str
@@ -76,19 +76,19 @@ class SignedCheckpoint(BaseModel):
     def verify(self, keyring: PublicKeyRing) -> bool:
         return self.signature.artifact_sha256 == sha256_json(
             self.checkpoint_document()
-        ) and keyring.verify(self.signature, purpose="drishti.transparency-checkpoint/v1")
+        ) and keyring.verify(self.signature, purpose="drishti.release-history-checkpoint/v1")
 
 
-class MerkleTransparencyLog:
-    """RFC6962-inspired append-only artifact log with offline-verifiable proofs."""
+class ReleaseHistory:
+    """Append-only release history with offline-verifiable inclusion proofs."""
 
     def __init__(self, *, log_id: str, checkpoint_signer: ArtifactSigner) -> None:
         self.log_id = log_id
         self._signer = checkpoint_signer
-        self._leaves: list[TransparencyLeaf] = []
+        self._leaves: list[ReleaseRecord] = []
 
     @property
-    def leaves(self) -> tuple[TransparencyLeaf, ...]:
+    def leaves(self) -> tuple[ReleaseRecord, ...]:
         return tuple(self._leaves)
 
     def append(
@@ -97,8 +97,8 @@ class MerkleTransparencyLog:
         artifact_type: str,
         artifact_sha256: str,
         metadata: dict[str, Any] | None = None,
-    ) -> TransparencyLeaf:
-        provisional = TransparencyLeaf(
+    ) -> ReleaseRecord:
+        provisional = ReleaseRecord(
             index=len(self._leaves),
             artifact_type=artifact_type,
             artifact_sha256=artifact_sha256,
@@ -127,7 +127,7 @@ class MerkleTransparencyLog:
 
     def inclusion_proof(self, leaf_index: int) -> InclusionProof:
         if leaf_index < 0 or leaf_index >= len(self._leaves):
-            raise IndexError("transparency leaf index is outside the tree")
+            raise IndexError("release record index is outside the history")
         audit_path: list[MerkleProofNode] = []
         layer = [leaf.leaf_hash for leaf in self._leaves]
         cursor = leaf_index
@@ -153,30 +153,30 @@ class MerkleTransparencyLog:
             audit_path=tuple(audit_path),
         )
 
-    def checkpoint(self) -> SignedCheckpoint:
+    def checkpoint(self) -> SignedHistoryCheckpoint:
         if not self._leaves:
-            raise ValueError("cannot checkpoint an empty transparency log")
-        provisional = SignedCheckpoint(
+            raise ValueError("cannot checkpoint an empty release history")
+        provisional = SignedHistoryCheckpoint(
             log_id=self.log_id,
             tree_size=len(self._leaves),
             root_hash=self.root_hash(),
             issued_at=datetime.now(UTC),
             signature=self._signer.sign_digest(
-                "0" * 64, purpose="drishti.transparency-checkpoint/v1"
+                "0" * 64, purpose="drishti.release-history-checkpoint/v1"
             ),
         )
         return provisional.model_copy(
             update={
                 "signature": self._signer.sign_digest(
                     sha256_json(provisional.checkpoint_document()),
-                    purpose="drishti.transparency-checkpoint/v1",
+                    purpose="drishti.release-history-checkpoint/v1",
                 )
             }
         )
 
     @staticmethod
     def verify_inclusion(
-        leaf: TransparencyLeaf,
+        leaf: ReleaseRecord,
         proof: InclusionProof,
         *,
         expected_root: str | None = None,

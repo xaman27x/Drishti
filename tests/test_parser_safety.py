@@ -17,16 +17,16 @@ from drishti.parsers.builtin import (
     rfc5424_firewall_pack,
 )
 from drishti.parsers.models import SourceDefinitionPack
-from drishti.trust.dialect import DialectDriftSentinel, DialectFingerprinter, DriftStatus
-from drishti.trust.federation import DialectCapsuleBuilder, FederationAggregator
-from drishti.trust.routing import AdaptiveTrustRouter, TrustRoute
-from drishti.trust.shadow import PromotionPolicy, ShadowEvaluator, ShadowPromotionGate
-from drishti.trust.transparency import MerkleTransparencyLog
+from drishti.safety.format_detection import DriftStatus, FormatChangeDetector, FormatFingerprinter
+from drishti.safety.format_sharing import FormatSummaryBuilder, FormatSummaryMatcher
+from drishti.safety.parser_comparison import ParserComparator, ParserPromotionGate, PromotionPolicy
+from drishti.safety.release_history import ReleaseHistory
+from drishti.safety.routing import FormatAwareRouter, ProcessingRoute
 
-FEDERATION_KEY = b"drishti-demo-federation-key-32b"
+SHARING_KEY = b"drishti-demo-format-sharing-key"
 
 
-class RecordingTrustPublisher:
+class RecordingRoutePublisher:
     def __init__(self) -> None:
         self.active: list[RawEvent] = []
         self.review: list[RawEvent] = []
@@ -58,18 +58,18 @@ def _raw_event(raw: bytes) -> RawEvent:
     )
 
 
-def test_dialect_dna_detects_firmware_format_drift_without_exporting_raw_values() -> None:
-    sentinel = DialectDriftSentinel(
+def test_format_change_is_detected_without_exporting_raw_values() -> None:
+    detector = FormatChangeDetector(
         source_key="generic.perimeter-firewall",
-        fingerprinter=DialectFingerprinter(FEDERATION_KEY),
+        fingerprinter=FormatFingerprinter(SHARING_KEY),
         baseline_size=4,
         window_size=2,
     )
     for _ in range(4):
-        decision = sentinel.observe(event_id=uuid4(), raw=RFC5424_FIREWALL_SAMPLE)
+        decision = detector.observe(event_id=uuid4(), raw=RFC5424_FIREWALL_SAMPLE)
         assert decision.status is DriftStatus.LEARNING
-    sentinel.observe(event_id=uuid4(), raw=CEF_FIREWALL_SAMPLE)
-    changed = sentinel.observe(event_id=uuid4(), raw=CEF_FIREWALL_SAMPLE)
+    detector.observe(event_id=uuid4(), raw=CEF_FIREWALL_SAMPLE)
+    changed = detector.observe(event_id=uuid4(), raw=CEF_FIREWALL_SAMPLE)
 
     assert changed.status is DriftStatus.QUARANTINE
     assert changed.js_divergence == 1.0
@@ -80,33 +80,33 @@ def test_dialect_dna_detects_firmware_format_drift_without_exporting_raw_values(
 
 @pytest.mark.asyncio
 async def test_drift_router_quarantines_without_losing_or_mutating_evidence() -> None:
-    sentinel = DialectDriftSentinel(
+    detector = FormatChangeDetector(
         source_key="generic.perimeter-firewall",
-        fingerprinter=DialectFingerprinter(FEDERATION_KEY),
+        fingerprinter=FormatFingerprinter(SHARING_KEY),
         baseline_size=4,
         window_size=2,
     )
-    publisher = RecordingTrustPublisher()
-    router = AdaptiveTrustRouter(sentinel=sentinel, publisher=publisher)
+    publisher = RecordingRoutePublisher()
+    router = FormatAwareRouter(detector=detector, publisher=publisher)
     for _ in range(4):
         await router.route(_raw_event(RFC5424_FIREWALL_SAMPLE))
     await router.route(_raw_event(CEF_FIREWALL_SAMPLE))
     changed = _raw_event(CEF_FIREWALL_SAMPLE)
     receipt = await router.route(changed)
 
-    assert receipt.routes == (TrustRoute.QUARANTINE,)
+    assert receipt.routes == (ProcessingRoute.QUARANTINE,)
     assert publisher.quarantined == [changed]
     assert publisher.quarantined[0].verify_integrity()
     assert publisher.quarantined[0].raw_sha256 == changed.raw_sha256
 
 
-def test_shadow_twin_accepts_equivalent_upgrade_and_rejects_critical_regression() -> None:
+def test_parser_comparison_accepts_equivalent_upgrade_and_rejects_regression() -> None:
     catalog = OcsfCatalog.load_packaged()
     active = rfc5424_firewall_pack()
     equivalent = active.model_copy(update={"version": "1.1.0"})
     events = [_raw_event(RFC5424_FIREWALL_SAMPLE) for _ in range(2)]
-    evaluator = ShadowEvaluator(catalog)
-    gate = ShadowPromotionGate(PromotionPolicy(minimum_events=2))
+    evaluator = ParserComparator(catalog)
+    gate = ParserPromotionGate(PromotionPolicy(minimum_events=2))
 
     safe_report = evaluator.evaluate(
         active_pack=active,
@@ -134,11 +134,11 @@ def test_shadow_twin_accepts_equivalent_upgrade_and_rejects_critical_regression(
     assert degraded_report.critical_regressions == 2
 
 
-def test_merkle_transparency_proofs_and_signed_checkpoint_are_offline_verifiable() -> None:
-    signer = ArtifactSigner.generate("transparency-root")
+def test_release_history_proofs_and_signed_checkpoint_are_offline_verifiable() -> None:
+    signer = ArtifactSigner.generate("release-history-root")
     keys = PublicKeyRing()
     keys.add_base64(signer.key_id, signer.public_key_base64())
-    log = MerkleTransparencyLog(log_id="drishti-parser-log", checkpoint_signer=signer)
+    log = ReleaseHistory(log_id="drishti-parser-releases", checkpoint_signer=signer)
     leaves = [
         log.append(
             artifact_type="parser-pack",
@@ -157,8 +157,8 @@ def test_merkle_transparency_proofs_and_signed_checkpoint_are_offline_verifiable
     assert not log.verify_inclusion(tampered, log.inclusion_proof(2))
 
 
-def test_signed_k_anonymous_capsules_correlate_dialects_without_raw_logs() -> None:
-    fingerprinter = DialectFingerprinter(FEDERATION_KEY)
+def test_signed_format_summaries_can_be_compared_without_raw_logs() -> None:
+    fingerprinter = FormatFingerprinter(SHARING_KEY)
     site_a = ArtifactSigner.generate("site-a")
     site_b = ArtifactSigner.generate("site-b")
     trusted = PublicKeyRing()
@@ -166,7 +166,7 @@ def test_signed_k_anonymous_capsules_correlate_dialects_without_raw_logs() -> No
     trusted.add_base64(site_b.key_id, site_b.public_key_base64())
     start = datetime(2026, 9, 26, 10, tzinfo=UTC)
     samples = [RFC5424_FIREWALL_SAMPLE] * 4
-    capsule_a = DialectCapsuleBuilder(
+    summary_a = FormatSummaryBuilder(
         fingerprinter=fingerprinter, signer=site_a, k_anonymity=2
     ).build(
         site_pseudonym="north-zone-01",
@@ -175,7 +175,7 @@ def test_signed_k_anonymous_capsules_correlate_dialects_without_raw_logs() -> No
         window_end=start + timedelta(hours=1),
         samples=samples,
     )
-    capsule_b = DialectCapsuleBuilder(
+    summary_b = FormatSummaryBuilder(
         fingerprinter=fingerprinter, signer=site_b, k_anonymity=2
     ).build(
         site_pseudonym="south-zone-02",
@@ -184,49 +184,49 @@ def test_signed_k_anonymous_capsules_correlate_dialects_without_raw_logs() -> No
         window_end=start + timedelta(hours=1),
         samples=samples,
     )
-    serialized = capsule_a.model_dump_json()
+    serialized = summary_a.model_dump_json()
     assert "10.0.0.1" not in serialized
     assert "edge-fw-01" not in serialized
-    assert capsule_a.verify(trusted)
+    assert summary_a.verify(trusted)
 
-    federation = FederationAggregator(trusted)
-    first = federation.ingest(capsule_a)
-    second = federation.ingest(capsule_b)
-    assert first.novel_dialect
-    assert not second.novel_dialect
+    matcher = FormatSummaryMatcher(trusted)
+    first = matcher.ingest(summary_a)
+    second = matcher.ingest(summary_b)
+    assert first.unknown_format
+    assert not second.unknown_format
     assert second.structural_similarity == 1.0
     assert second.participating_sites == 2
 
 
 @pytest.mark.asyncio
-async def test_parser_upgrade_requires_shadow_evidence_and_enters_transparency_log() -> None:
+async def test_parser_upgrade_requires_comparison_and_enters_release_history() -> None:
     catalog = OcsfCatalog.load_packaged()
     parser_signer = ArtifactSigner.generate("parser-authority")
     reviewer = ArtifactSigner.generate("reviewer")
     registry_signer = ArtifactSigner.generate("registry-root")
-    transparency_signer = ArtifactSigner.generate("transparency-root")
+    history_signer = ArtifactSigner.generate("release-history-root")
     parser_keys = PublicKeyRing()
     parser_keys.add_base64(parser_signer.key_id, parser_signer.public_key_base64())
     reviewer_keys = PublicKeyRing()
     reviewer_keys.add_base64(reviewer.key_id, reviewer.public_key_base64())
-    transparency_keys = PublicKeyRing()
-    transparency_keys.add_base64(
-        transparency_signer.key_id, transparency_signer.public_key_base64()
+    history_keys = PublicKeyRing()
+    history_keys.add_base64(
+        history_signer.key_id, history_signer.public_key_base64()
     )
-    transparency = MerkleTransparencyLog(
-        log_id="drishti-parser-log", checkpoint_signer=transparency_signer
+    release_history = ReleaseHistory(
+        log_id="drishti-parser-releases", checkpoint_signer=history_signer
     )
     registry = ParserRegistry(
         registry_signer=registry_signer,
         parser_keys=parser_keys,
         reviewer_keys=reviewer_keys,
-        transparency_log=transparency,
+        release_history=release_history,
     )
     control = ParserControlPlane(
         registry=registry,
         qualification_gate=QualificationGate(catalog),
         parser_signer=parser_signer,
-        promotion_gate=ShadowPromotionGate(PromotionPolicy(minimum_events=2)),
+        promotion_gate=ParserPromotionGate(PromotionPolicy(minimum_events=2)),
     )
 
     async def approve_qualify(pack: SourceDefinitionPack) -> str:
@@ -248,10 +248,10 @@ async def test_parser_upgrade_requires_shadow_evidence_and_enters_transparency_l
 
     candidate = active_pack.model_copy(update={"version": "1.1.0"})
     second_id = await approve_qualify(candidate)
-    with pytest.raises(ValueError, match="shadow evidence"):
+    with pytest.raises(ValueError, match="comparison report"):
         await control.activate(proposal_id=second_id, actor_id="release-bot")
 
-    report = ShadowEvaluator(catalog).evaluate(
+    report = ParserComparator(catalog).evaluate(
         active_pack=active_pack,
         candidate_pack=candidate,
         events=[_raw_event(RFC5424_FIREWALL_SAMPLE) for _ in range(2)],
@@ -259,12 +259,12 @@ async def test_parser_upgrade_requires_shadow_evidence_and_enters_transparency_l
     second = await control.activate(
         proposal_id=second_id,
         actor_id="release-bot",
-        shadow_report=report,
+        comparison_report=report,
     )
     release = registry.release_at(second.release_revision or 0)
-    leaf, proof, checkpoint = registry.transparency_evidence(release.registry_revision)
+    leaf, proof, checkpoint = registry.release_evidence(release.registry_revision)
 
-    assert release.shadow_report_sha256 == report.report_sha256
+    assert release.comparison_report_sha256 == report.report_sha256
     assert registry.verify_history()
-    assert transparency.verify_inclusion(leaf, proof, expected_root=checkpoint.root_hash)
-    assert checkpoint.verify(transparency_keys)
+    assert release_history.verify_inclusion(leaf, proof, expected_root=checkpoint.root_hash)
+    assert checkpoint.verify(history_keys)
