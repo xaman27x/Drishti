@@ -1,4 +1,4 @@
-# ADR-0001: Use OCSF as the normalized event contract
+# Decision: Use OCSF as the normalized event schema
 
 - Status: Accepted
 - Date: 2026-09-26
@@ -30,7 +30,7 @@ private fork of OCSF core would create interoperability and upgrade problems.
    The compressed artifact is committed and loaded locally at runtime.
 6. Every normalized event is validated against the exact bundle digest recorded
    in its conservation certificate.
-7. OCSF upgrades require a new ADR, compatibility report, regenerated fixtures,
+7. OCSF upgrades require a new decision record, compatibility report, regenerated fixtures,
    parser qualification, and controlled replay impact analysis.
 
 ## Security boundary

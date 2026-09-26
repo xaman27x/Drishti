@@ -1,4 +1,4 @@
-# ADR-0002: Governed, Signed Parser Control Plane
+# Decision: Require review and signatures before parser activation
 
 - Status: accepted
 - Date: 2026-09-26
