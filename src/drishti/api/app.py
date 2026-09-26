@@ -87,7 +87,7 @@ def create_app(
 
     app = FastAPI(
         title="Drishti ULPF",
-        version="0.3.0",
+        version="0.4.0",
         description="Lossless universal log ingestion and preprocessing",
         lifespan=lifespan,
     )

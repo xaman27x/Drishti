@@ -30,7 +30,7 @@ def rfc5424_firewall_pack() -> SourceDefinitionPack:
         display_name="Generic RFC5424 Perimeter Firewall",
         parser_format=ParserFormat.RFC5424,
         target_class_uid=4001,
-        generated_by="drishti.builtin@0.3.0",
+        generated_by="drishti.builtin@0.4.0",
         budget=ResourceBudget(max_event_bytes=65_536, max_p95_parse_ms=10),
         rules=_network_rules(
             timestamp_capture="timestamp",
@@ -90,7 +90,7 @@ def cef_firewall_pack() -> SourceDefinitionPack:
         display_name="Generic CEF Perimeter Firewall",
         parser_format=ParserFormat.CEF,
         target_class_uid=4001,
-        generated_by="drishti.builtin@0.3.0",
+        generated_by="drishti.builtin@0.4.0",
         budget=ResourceBudget(max_event_bytes=65_536, max_p95_parse_ms=10),
         rules=tuple(rules),
         fixtures=(

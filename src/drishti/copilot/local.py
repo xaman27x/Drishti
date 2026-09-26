@@ -56,7 +56,7 @@ class AirGappedSchemaCopilot:
                 "sample set is heterogeneous or malformed; split it before proposing a parser"
             )
         pack = self._candidate_pack(detected).model_copy(
-            update={"generated_by": "drishti.copilot.local-grammar@0.3.0"}
+            update={"generated_by": "drishti.copilot.local-grammar@0.4.0"}
         )
         mapped = {rule.source_capture for rule in pack.rules if rule.source_capture}
         captures = {capture for parsed in successful[detected] for capture in parsed.captures}
