@@ -33,7 +33,9 @@ dev = [
 ]
 release = [
   "build>=1.2,<2.0",
-  "twine>=5.0,<6.0",
+  "twine>=6.0,<7.0",
+  "pkginfo>=1.12.0",
+  "packaging<26",
   "cyclonedx-bom>=3.11,<6.0",
 ]
 
