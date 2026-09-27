@@ -1,4 +1,6 @@
-.PHONY: install run test lint format verify-ocsf build-ocsf check
+PYTHON ?= python
+
+.PHONY: install run test lint format verify-ocsf build-ocsf check release-check
 
 install:
 	python -m pip install -e ".[dev]"
@@ -18,11 +20,13 @@ format:
 	ruff check --fix .
 
 verify-ocsf:
-	python scripts/verify_ocsf_vendor.py
-	python scripts/verify_ocsf_bundle.py
-	python scripts/build_ocsf_bundle.py --check
+	$(PYTHON) scripts/verify_ocsf_vendor.py
+	$(PYTHON) scripts/verify_ocsf_bundle.py
+	$(PYTHON) scripts/build_ocsf_bundle.py --check
 
 build-ocsf:
-	python scripts/build_ocsf_bundle.py
+	$(PYTHON) scripts/build_ocsf_bundle.py
 
 check: lint verify-ocsf test
+
+release-check: check
