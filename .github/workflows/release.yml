@@ -1,0 +1,201 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/drishti
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Resolve and verify release version
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python scripts/check_release.py --version "$version" --tag "$GITHUB_REF_NAME"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: python -m pip install -e ".[dev,release]"
+      - name: Run release gates
+        run: make release-check
+
+  package:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[release]"
+      - name: Build wheel and source distribution
+        run: |
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          python -m build
+          python -m twine check dist/*
+      - name: Generate Python dependency SBOM
+        shell: bash
+        run: |
+          python -m venv .sbom-venv
+          wheel=(dist/*.whl)
+          .sbom-venv/bin/pip install "${wheel[0]}[production]"
+          env -u PYTHONPATH cyclonedx-py environment .sbom-venv \
+            --output-format JSON \
+            --output-file "dist/drishti-${{ needs.verify.outputs.version }}.cdx.json"
+      - name: Generate immutable checksums
+        working-directory: dist
+        run: |
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' \
+            | sort --zero-terminated \
+            | xargs --null sha256sum > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Attest package provenance
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Attest wheel SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.whl
+          sbom-path: dist/drishti-${{ needs.verify.outputs.version }}.cdx.json
+      - uses: actions/upload-artifact@v6
+        with:
+          name: drishti-${{ needs.verify.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  container:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build test image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: drishti:release-check
+          build-args: |
+            VERSION=${{ needs.verify.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ github.event.repository.pushed_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify test image health
+        run: |
+          docker run --detach --name drishti-release \
+            --env DRISHTI_ADAPTER_MODE=memory drishti:release-check
+          for attempt in $(seq 1 30); do
+            status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' drishti-release)"
+            test "$status" = healthy && exit 0
+            test "$status" = unhealthy && docker logs drishti-release && exit 1
+            sleep 1
+          done
+          docker logs drishti-release
+          exit 1
+      - name: Remove test container
+        if: always()
+        run: docker rm --force drishti-release >/dev/null 2>&1 || true
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Derive OCI metadata
+        id: metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=Drishti
+            org.opencontainers.image.description=Lossless, human-governed universal log preprocessing framework
+      - name: Publish multi-architecture image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.verify.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ github.event.repository.pushed_at }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Attest published image
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-version: ${{ needs.verify.outputs.version }}
+          push-to-registry: true
+
+  github-release:
+    needs: [verify, package, container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: drishti-${{ needs.verify.outputs.version }}
+          path: dist
+      - name: Record immutable container identity
+        run: |
+          printf '%s@%s\n' "${IMAGE_NAME}" "${{ needs.container.outputs.digest }}" \
+            > dist/container-image.txt
+          sha256sum dist/container-image.txt > dist/container-image.txt.sha256
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "Drishti ${{ needs.verify.outputs.version }}"
