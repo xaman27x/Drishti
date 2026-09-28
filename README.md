@@ -211,6 +211,20 @@ This starts Drishti with Redpanda and MinIO. The supplied credentials and single
 for local evaluation. Production deployments must provide TLS, secrets management, replication,
 retention policies, backups, and external signing-key custody.
 
+### Frontend console
+
+The React control-plane UI lives in `frontend/` and uses mock responses for endpoints that are not
+available in the API yet. With the backend running on port 8080, start the UI with:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. Mock data is enabled by default; the Settings page can switch to
+available API routes, while unavailable routes continue to use mock responses.
+
 ## API examples
 
 ### Ingest an event

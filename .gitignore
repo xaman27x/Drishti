@@ -13,3 +13,4 @@ build/
 .idea/
 .vscode/
 schemas/compiled/*.tmp
+frontend/node_modules/
