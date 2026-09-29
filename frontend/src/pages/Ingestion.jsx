@@ -1,3 +1,4 @@
+import IngestForm from "../components/ingestion/IngestForm.jsx";
 import { useResource } from "../hooks/useResource.js";
 import { api } from "../services/api.js";
 import { DataTable, PageHeader, PlaceholderLabel, ResourceState, SectionTitle, StatusTag, Surface } from "../components/common/UI.jsx";
@@ -21,6 +22,7 @@ export default function Ingestion() {
   return (
     <>
       <PageHeader eyebrow="EVIDENCE INTAKE" title="Ingestion" description="Monitor incoming evidence and ingestion sources." action={<PlaceholderLabel />} />
+      <IngestForm />
       <ResourceState loading={loading} error={error}>
         <div className="integration-grid">
           {data?.services?.map((service) => {
@@ -30,7 +32,7 @@ export default function Ingestion() {
         </div>
 
         <div className="section-spacer" />
-        <SectionTitle title="Ingestion worker" detail="Kafka → immutable evidence archive → parser" />
+        <SectionTitle title="Ingestion worker" detail="Archived evidence → Kafka reference → parser" />
         {data?.worker && <WorkerStatusCard worker={data.worker} />}
 
         <Surface className="surface-space ingestion-recent">
@@ -48,7 +50,7 @@ function ServiceCard({ service, icon: Icon }) {
       <div className="service-card-head"><span className="service-icon"><Icon size={17} /></span><StatusTag status={service.status}>{service.detail}</StatusTag></div>
       <h3>{service.name}</h3>
       <div className="service-facts">{service.facts.map(([label, value]) => <div key={label}><span>{label}</span><strong className={value.includes(".") || value.includes("/") ? "mono-cell" : ""}>{value}</strong></div>)}</div>
-      <div className="service-card-foot"><PlaceholderLabel /><span className="service-healthy-note"><i /> Healthy</span></div>
+      <div className="service-card-foot"><PlaceholderLabel /><span className="service-healthy-note"><i /> {service.detail}</span></div>
     </Surface>
   );
 }

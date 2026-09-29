@@ -32,7 +32,7 @@ export function StatusTag({ status, children }) {
   return <span className={`status-tag status-${key}`}><span className="status-dot" />{children ?? status}</span>;
 }
 
-export function PlaceholderLabel({ children = "API placeholder" }) {
+export function PlaceholderLabel({ children = "Live API" }) {
   return <span className="placeholder-label"><Info size={12} strokeWidth={1.8} />{children}</span>;
 }
 
@@ -79,7 +79,7 @@ export function ResourceState({ loading, error, empty, children }) {
     return <div className="loading-state" aria-label="Loading"><span /><span /><span /></div>;
   }
   if (error) {
-    return <EmptyState title="Couldn’t load this view" detail="The API is not connected. Try again in a moment." icon={AlertCircle} />;
+    return <EmptyState title="Couldn’t load this view" detail={error.message ?? "The API is not connected."} icon={AlertCircle} />;
   }
   if (empty) return <EmptyState title="Waiting for ingestion data" detail="The ingestion API is not connected yet." />;
   return children;

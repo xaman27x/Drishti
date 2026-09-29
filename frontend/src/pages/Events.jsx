@@ -32,12 +32,13 @@ export default function Events() {
 
   const rows = useMemo(() => (data ?? []).filter((event) => {
     const needle = query.toLowerCase();
-    return (!needle || [event.id, event.source, event.parser, event.format, event.className].some((value) => value.toLowerCase().includes(needle)))
+    const days = timeRange === "Last 7 days" ? 7 : timeRange === "Last 30 days" ? 30 : 1;
+    return Date.now() - new Date(event.timestamp).getTime() <= days * 86400000 && (!needle || [event.id, event.source, event.parser, event.format, event.className].some((value) => value.toLowerCase().includes(needle)))
       && (format === "All formats" || event.format === format)
       && (status === "All statuses" || event.status === status)
       && (source === "All sources" || event.source === source)
       && (parser === "All parsers" || event.parser === parser);
-  }), [data, query, format, status, source, parser]);
+  }), [data, query, format, status, source, parser, timeRange]);
 
   function openEvent(event) {
     setSelected(event);
@@ -53,9 +54,9 @@ export default function Events() {
           <span className="toolbar-divider" />
           <FilterSelect label="Time range" value={timeRange} options={["Last 24 hours", "Last 7 days", "Last 30 days"]} onChange={setTimeRange} icon={Clock3} />
           <FilterSelect label="Format" value={format} options={["All formats", "RFC5424", "CEF", "JSON", "CSV"]} onChange={setFormat} icon={FileCode2} />
-          <FilterSelect label="Status" value={status} options={["All statuses", "Normalized", "Processing", "Quarantined", "Failed"]} onChange={setStatus} icon={Filter} />
+          <FilterSelect label="Status" value={status} options={["All statuses", "Archived", "Pending", "Normalized", "Processing", "Quarantined", "Failed"]} onChange={setStatus} icon={Filter} />
           <button className="filter-advanced" onClick={() => { setSource(source === "All sources" ? "edge-fw-01" : "All sources"); }}><Filter size={14} /> Source</button>
-          <button className="filter-advanced" onClick={() => { setParser(parser === "All parsers" ? "rfc5424-firewall" : "All parsers"); }}><Braces size={14} /> Parser</button>
+          <button className="filter-advanced" onClick={() => { setParser(parser === "All parsers" ? "drishti.rfc5424-firewall@1.0.0" : "All parsers"); }}><Braces size={14} /> Parser</button>
         </div>
         <div className="event-applied-filters">
           <span>{rows.length} events</span>
@@ -66,14 +67,14 @@ export default function Events() {
         <ResourceState loading={loading} error={error}>
           <DataTable columns={columns} rows={rows} onRowClick={openEvent} />
         </ResourceState>
-        <div className="event-table-footer"><span>Showing {rows.length} of {data?.length ?? 0} illustrative records</span><span>Click a row to inspect event details <span className="key-cap">↵</span></span></div>
+        <div className="event-table-footer"><span>Showing {rows.length} of {data?.length ?? 0} loaded records</span><span>Click a row to inspect event details <span className="key-cap">↵</span></span></div>
       </section>
 
       <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title="Event details" subtitle={selected?.id} size="wide">
         {selected && <>
           <div className="event-detail-top"><div><StatusTag status={selected.status} /><span className="format-mark">{selected.format}</span><span className="mono-cell">{new Date(selected.timestamp).toISOString().replace("T", " ").slice(0, 19)} UTC</span></div><span className="event-source-label">{selected.source} · {selected.sourceType}</span></div>
           <div className="detail-tabs" role="tablist">{tabs.map((tab) => <button key={tab} role="tab" aria-selected={activeTab === tab} className={activeTab === tab ? "detail-tab active" : "detail-tab"} onClick={() => setActiveTab(tab)}>{tab}</button>)}</div>
-          <EventTab event={selected} tab={activeTab} />
+          <EventTab event={(data ?? []).find(item => item.id === selected.id) ?? selected} tab={activeTab} />
         </>}
       </Drawer>
     </>
@@ -85,11 +86,11 @@ function FilterSelect({ label, value, options, onChange, icon: Icon }) {
 }
 
 function EventTab({ event, tab }) {
-  if (tab === "Raw evidence") return <div className="event-tab-content"><div className="code-heading"><span>RAW BYTES · UTF-8 VIEW</span><PlaceholderLabel /></div><pre className="raw-evidence-view">{event.raw}</pre><p className="drawer-note">Original evidence is immutable. Display is illustrative mock data.</p></div>;
+  if (tab === "Raw evidence") return <div className="event-tab-content"><div className="code-heading"><span>RAW BYTES · UTF-8 VIEW</span><PlaceholderLabel /></div><pre className="raw-evidence-view">{event.raw}</pre><p className="drawer-note">UTF-8 preview may replace invalid characters. Download the original bytes from the evidence endpoint.</p></div>;
   if (tab === "Normalized event") return <div className="event-tab-content"><div className="code-heading"><span>OCSF EVENT · 1.9.0</span><PlaceholderLabel /></div><JsonViewer value={event.normalized} /></div>;
-  if (tab === "Provenance") return <div className="event-tab-content"><div className="provenance-mini-line"><span><InboxIcon /></span><i /><span><ShieldCheck size={15} /></span><i /><span><Braces size={15} /></span><i /><span><GitBranch size={15} /></span></div><div className="detail-grid"><div><span>Content hash</span><strong className="mono-cell">sha256:8d1d6c1f…f29aa</strong></div><div><span>Parser identity</span><strong className="mono-cell">{event.parser}</strong></div><div><span>Byte accounting</span><strong>100% accounted</strong></div><div><span>Archive status</span><strong>Immutable evidence</strong></div></div><PlaceholderLabel /></div>;
-  if (tab === "Processing") return <div className="event-tab-content"><div className="processing-list">{[["Accepted", "18:42:16.001", "Kafka · drishti.raw.accepted.v1"], ["Archived", "18:42:16.005", "MinIO · raw evidence stored"], ["Parsed", "18:42:16.010", `${event.parser} · deterministic parse`], ["Normalized", "18:42:16.014", "OCSF schema 1.9.0 · validated"]].map(([label, time, detail]) => <div className="processing-item" key={label}><i /><div><strong>{label}</strong><span>{detail}</span></div><time>{time} UTC</time></div>)}</div><PlaceholderLabel /></div>;
-  return <div className="event-tab-content"><div className="detail-grid"><div><span>Source</span><strong>{event.source} · {event.sourceType}</strong></div><div><span>Parser</span><strong className="mono-cell">{event.parser}</strong></div><div><span>Severity</span><strong><StatusTag status={event.severity}>{event.severity}</StatusTag></strong></div><div><span>OCSF class</span><strong>{event.className}</strong></div><div><span>Processing time</span><strong>{event.duration}</strong></div><div><span>Trace ID</span><strong className="mono-cell">trc_7e2c91a4…</strong></div></div><div className="drawer-subsection"><h3>Raw preview</h3><pre className="raw-evidence-view compact">{event.raw}</pre></div><PlaceholderLabel /></div>;
+  if (tab === "Provenance") return <div className="event-tab-content"><div className="provenance-mini-line"><span><InboxIcon /></span><i /><span><ShieldCheck size={15} /></span><i /><span><Braces size={15} /></span><i /><span><GitBranch size={15} /></span></div><div className="detail-grid"><div><span>Content hash</span><strong className="mono-cell">{event.rawSha256}</strong></div><div><span>Parser identity</span><strong className="mono-cell">{event.parser}</strong></div><div><span>Byte accounting</span><strong>{event.certificate ? `${(event.certificate.conservation_score * 100).toFixed(1)}% accounted` : "Not processed"}</strong></div><div><span>Archive status</span><strong>Immutable evidence</strong></div></div><PlaceholderLabel /></div>;
+  if (tab === "Processing") return <div className="event-tab-content"><JsonViewer value={{published: event.published, publicationError: event.publicationError, result: event.result}} /></div>;
+  return <div className="event-tab-content"><div className="detail-grid"><div><span>Source</span><strong>{event.source} · {event.sourceType}</strong></div><div><span>Parser</span><strong className="mono-cell">{event.parser}</strong></div><div><span>Severity</span><strong><StatusTag status={event.severity}>{event.severity}</StatusTag></strong></div><div><span>OCSF class</span><strong>{event.className}</strong></div><div><span>Processing time</span><strong>{event.duration}</strong></div><div><span>Trace ID</span><strong className="mono-cell">{event.traceId}</strong></div></div><div className="drawer-subsection"><h3>Raw preview</h3><pre className="raw-evidence-view compact">{event.raw}</pre></div><PlaceholderLabel /></div>;
 }
 
 function InboxIcon() {

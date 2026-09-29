@@ -41,6 +41,7 @@ class IngestionService:
         self._evidence_store = evidence_store
         self._publisher = publisher
         self._max_event_bytes = max_event_bytes
+        self._published: set[UUID] = set()
 
     async def ingest(
         self,
@@ -71,20 +72,20 @@ class IngestionService:
                 raise IdempotencyConflictError(
                     "idempotency key was already used for a different payload"
                 )
-            return IngestionReceipt(
-                event_id=event.event_id,
-                trace_id=event.trace_id,
-                raw_sha256=event.raw_sha256,
-                duplicate=True,
-            )
+            archived_event = await self._evidence_store.get(event.event_id)
+            if archived_event is None:
+                raise IngestionError("archived event disappeared")
+            event = archived_event
 
-        # This ordering is a forensic invariant: publishing cannot precede archival.
-        await self._publisher.publish_raw_archived(event)
+        # Durable deployments use the persistent outbox in runtime.ingestion.
+        if event.event_id not in self._published:
+            await self._publisher.publish_raw_archived(event)
+            self._published.add(event.event_id)
         return IngestionReceipt(
             event_id=event.event_id,
             trace_id=event.trace_id,
             raw_sha256=event.raw_sha256,
-            duplicate=False,
+            duplicate=not archive_result.created,
         )
 
     @staticmethod

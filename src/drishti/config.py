@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr
@@ -26,6 +27,14 @@ class Settings(BaseSettings):
     minio_secret_key: SecretStr = SecretStr("change-me-in-production")
     minio_bucket: str = "drishti-raw-evidence"
     minio_secure: bool = False
+    state_dir: Path = Path(".drishti-state")
+    minio_results_bucket: str = "drishti-results"
+    kafka_consumer_group: str = "drishti-normalizer-v1"
+    outbox_interval_seconds: float = Field(default=2, gt=0)
+    worker_stale_seconds: int = Field(default=30, ge=5)
+    drift_baseline_size: int = Field(default=32, ge=4)
+    drift_window_size: int = Field(default=16, ge=2)
+    demo_admin_enabled: bool = False
     registry_private_key_b64: SecretStr | None = None
 
 

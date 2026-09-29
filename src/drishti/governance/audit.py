@@ -86,3 +86,10 @@ class AppendOnlyAuditLog:
                 return False
             previous = entry.entry_hash
         return True
+
+    def restore(self, entries: list[AuditEntry]) -> None:
+        previous = self._entries
+        self._entries = entries
+        if not self.verify():
+            self._entries = previous
+            raise ValueError("persisted audit chain failed verification")

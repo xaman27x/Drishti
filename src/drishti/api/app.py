@@ -2,15 +2,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from importlib import import_module
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from drishti.adapters.kafka import KafkaArchivedEventPublisher
 from drishti.adapters.memory import InMemoryEventPublisher, InMemoryRawEvidenceStore
-from drishti.adapters.minio import MinioEvidenceStore
 from drishti.api.schemas import (
     ErrorResponse,
     IngestEventRequest,
@@ -35,55 +32,33 @@ def _service_from_request(request: Request) -> IngestionService:
 def create_app(
     ingestion_service: IngestionService | None = None,
     ocsf_catalog: OcsfCatalog | None = None,
+    runtime: Any | None = None,
 ) -> FastAPI:
     settings = get_settings()
-    producer: Any | None = None
-    evidence_store: MinioEvidenceStore | None = None
-    if ingestion_service is None:
-        if settings.adapter_mode == "durable":
-            aio_kafka = import_module("aiokafka")
-            minio_sdk = import_module("minio")
+    from drishti.api.runtime_routes import router
+    from drishti.runtime.service import Runtime
 
-            producer = aio_kafka.AIOKafkaProducer(
-                bootstrap_servers=settings.kafka_bootstrap_servers,
-                acks="all",
-                enable_idempotence=True,
-                compression_type="gzip",
-            )
-            evidence_store = MinioEvidenceStore(
-                minio_sdk.Minio(
-                    settings.minio_endpoint,
-                    access_key=settings.minio_access_key,
-                    secret_key=settings.minio_secret_key.get_secret_value(),
-                    secure=settings.minio_secure,
-                ),
-                bucket=settings.minio_bucket,
-            )
-            ingestion_service = IngestionService(
-                evidence_store=evidence_store,
-                publisher=KafkaArchivedEventPublisher(
-                    producer, topic=settings.kafka_archived_topic
-                ),
-                max_event_bytes=settings.max_event_bytes,
-            )
-        else:
-            ingestion_service = IngestionService(
-                evidence_store=InMemoryRawEvidenceStore(),
-                publisher=InMemoryEventPublisher(),
-                max_event_bytes=settings.max_event_bytes,
-            )
+    rt = runtime
+    if rt is None and settings.adapter_mode == "durable":
+        rt = Runtime(settings)
+    if rt is not None:
+        ingestion_service = rt.ingestion
+    elif ingestion_service is None:
+        ingestion_service = IngestionService(
+            evidence_store=InMemoryRawEvidenceStore(),
+            publisher=InMemoryEventPublisher(),
+            max_event_bytes=settings.max_event_bytes,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        if evidence_store is not None:
-            await evidence_store.ensure_bucket()
-        if producer is not None:
-            await producer.start()
+        if rt:
+            await rt.start_api()
         try:
             yield
         finally:
-            if producer is not None:
-                await producer.stop()
+            if rt:
+                await rt.close()
 
     app = FastAPI(
         title="Drishti ULPF",
@@ -91,6 +66,8 @@ def create_app(
         description="Lossless universal log ingestion and preprocessing",
         lifespan=lifespan,
     )
+    app.state.runtime = rt
+    app.include_router(router)
     app.state.ingestion_service = ingestion_service
     app.state.ocsf_catalog = ocsf_catalog or get_ocsf_catalog()
 
@@ -110,8 +87,15 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/health/ready", tags=["health"])
-    async def readiness() -> dict[str, str]:
-        return {"status": "ready"}
+    async def readiness() -> JSONResponse:
+        if rt is None:
+            return JSONResponse({"status": "ready", "mode": "memory"})
+        health = await rt.health()
+        return JSONResponse(health, status_code=200 if health["status"] == "ready" else 503)
+
+    @app.get("/health/dependencies", tags=["health"])
+    async def dependencies() -> dict[str, Any]:
+        return await rt.health() if rt else {"status": "ready", "mode": "memory"}
 
     @app.post(
         "/v1/events",

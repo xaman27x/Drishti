@@ -1,3 +1,6 @@
+frontend
+.drishti-state
+.venv*
 .git
 .github
 .venv

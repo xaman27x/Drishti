@@ -280,3 +280,23 @@ class ParserRegistry:
             ):
                 return False
         return True
+
+    def restore(self, releases: list[RegistryRelease]) -> None:
+        if self._history:
+            raise ValueError("restore requires an empty registry")
+        self._history = releases
+        for release in releases:
+            self._active[release.signed_pack.pack.source_key] = release.registry_revision
+            if self._release_history is not None:
+                leaf = self._release_history.append(
+                    artifact_type="parser-registry-release",
+                    artifact_sha256=release.release_signature.artifact_sha256,
+                    metadata={
+                        "registry_revision": release.registry_revision,
+                        "source_key": release.signed_pack.pack.source_key,
+                        "pack_sha256": release.signed_pack.pack.sha256(),
+                    },
+                )
+                self._release_leaf_indices[release.registry_revision] = leaf.index
+        if not self.verify_history():
+            raise ValueError("persisted registry failed verification")

@@ -14,3 +14,7 @@ build/
 .vscode/
 schemas/compiled/*.tmp
 frontend/node_modules/
+
+.drishti-state/
+frontend/node_modules/
+frontend/dist/

@@ -1,34 +1,40 @@
-import { mockApi } from "./mockApi.js";
-
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
-const environmentMocks = import.meta.env.VITE_USE_MOCK_API !== "false";
 
-function useMocks() {
-  const savedSource = localStorage.getItem("drishti-data-source");
-  return savedSource ? savedSource !== "live" : environmentMocks;
-}
-
-async function getOrMock(path, mockRequest) {
-  if (useMocks()) return mockRequest();
-
-  try {
-    const response = await fetch(`${baseUrl}${path}`);
-    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-    return await response.json();
-  } catch {
-    return mockRequest();
-  }
+async function request(path, body) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
+    headers: { "Content-Type": "application/json", "X-Drishti-Demo": "true" },
+    signal: AbortSignal.timeout(20000),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : JSON.stringify(result.detail ?? result));
+  return result;
 }
 
 export const api = {
-  getSystemHealth: () => getOrMock("/health/ready", mockApi.getSystemHealth),
-  getDashboard: () => getOrMock("/api/dashboard", mockApi.getDashboard),
-  getPipelineStatus: () => getOrMock("/api/pipeline/status", mockApi.getPipelineStatus),
-  getIngestionStatus: () => getOrMock("/api/ingestion/status", mockApi.getIngestionStatus),
-  getEvents: () => getOrMock("/api/events", mockApi.getEvents),
-  getEvent: (id) => getOrMock(`/api/events/${encodeURIComponent(id)}`, () => mockApi.getEvent(id)),
-  getParserStatus: () => getOrMock("/api/parsers", mockApi.getParserStatus),
-  getProvenance: (id) => getOrMock(`/api/provenance/${encodeURIComponent(id)}`, mockApi.getProvenance),
-  getReplay: (id) => getOrMock(`/api/replay/${encodeURIComponent(id)}`, mockApi.getReplay),
-  getGovernanceAudit: () => getOrMock("/api/governance/audit", mockApi.getGovernanceAudit),
+  getSystemHealth: () => request("/health/dependencies"),
+  getDashboard: () => request("/api/dashboard"),
+  getPipelineStatus: () => request("/api/pipeline/status"),
+  getIngestionStatus: () => request("/api/ingestion/status"),
+  getEvents: () => request("/api/events"),
+  getEvent: (id) => request(`/api/events/${encodeURIComponent(id)}`),
+  getParserStatus: () => request("/api/parsers"),
+  getEvidence: (id) => request(`/v1/events/${encodeURIComponent(id)}/evidence`),
+  getReplay: () => request("/api/replay"),
+  createReplay: (body) => request("/api/replay", body),
+  approveReplay: (id) => request(`/api/replay/${id}/approve`, {}),
+  getGovernanceAudit: () => request("/api/governance/audit"),
+  getProposals: () => request("/api/governance/proposals"),
+  propose: (pack) => request("/api/governance/proposals", { pack }),
+  proposalAction: (id, body) => request(`/api/governance/proposals/${id}`, body),
+  copilot: (event_ids, version) => request("/api/copilot/proposals", { event_ids, version }),
+  getProof: (revision) => request(`/api/parsers/${revision}/proof`),
+  workerControl: (action) => request("/api/worker/control", { action }),
+  ingest: (raw, sourceType, sourceId, idempotencyKey) => {
+    const bytes = new TextEncoder().encode(raw);
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return request("/v1/events", { tenant_id: "sih-demo", source_id: sourceId, source_type: sourceType,
+      idempotency_key: idempotencyKey, payload_base64: btoa(binary) });
+  },
 };

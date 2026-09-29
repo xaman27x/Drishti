@@ -26,10 +26,10 @@ export default function Dashboard() {
   return (
     <>
       <PageHeader
-        eyebrow="MONDAY, SEPTEMBER 28, 2026"
-        title="Good evening."
+        eyebrow={new Date().toLocaleDateString()}
+        title="Processing overview"
         description="Drishti processing overview"
-        action={<StatusTag status="healthy">All systems operational</StatusTag>}
+        action={<PlaceholderLabel />}
       />
       <ResourceState loading={loading} error={error}>
         <div className="metric-grid">
@@ -37,7 +37,7 @@ export default function Dashboard() {
         </div>
 
         <Surface className="dashboard-pipeline surface-space">
-          <SectionTitle title="Pipeline health" detail="Illustrative status across the evidence lifecycle" action={<button className="text-action" onClick={() => navigate("/pipeline")}>Full pipeline <ArrowUpRight size={14} /></button>} />
+          <SectionTitle title="Pipeline health" detail="Current status across the evidence lifecycle" action={<button className="text-action" onClick={() => navigate("/pipeline")}>Full pipeline <ArrowUpRight size={14} /></button>} />
           <div className="pipeline-strip">
             {dashboard.pipeline.map((stage, index) => {
               const Icon = pipelineIcons[stage.id] ?? Workflow;
@@ -60,7 +60,7 @@ export default function Dashboard() {
         <Surface className="surface-space activity-surface">
           <SectionTitle title="Recent processing activity" detail="Latest evidence moving through Drishti" action={<button className="text-action" onClick={() => navigate("/events")}>Explore events <ChevronRight size={14} /></button>} />
           <DataTable columns={eventColumns} rows={dashboard.events.slice(0, 5)} onRowClick={(event) => navigate(`/events?q=${encodeURIComponent(event.id)}`)} />
-          <div className="table-note"><span>Showing 5 of 1,284,092 events</span><PlaceholderLabel /></div>
+          <div className="table-note"><span>Showing {dashboard.events.length} of {dashboard.total ?? 0} events</span><PlaceholderLabel /></div>
         </Surface>
       </ResourceState>
 
@@ -72,5 +72,5 @@ export default function Dashboard() {
 }
 
 function StageDetails({ stage }) {
-  return <div className="drawer-stack"><StatusTag status={stage.status}>{stage.description}</StatusTag><div className="detail-grid"><div><span>Current metric</span><strong>{stage.metric}</strong></div><div><span>Component ID</span><strong className="mono-cell">{stage.id}</strong></div></div><PlaceholderLabel /><p className="drawer-note">Detailed component metrics will appear when the corresponding status endpoint is available.</p></div>;
+  return <div className="drawer-stack"><StatusTag status={stage.status}>{stage.description}</StatusTag><div className="detail-grid"><div><span>Current metric</span><strong>{stage.metric}</strong></div><div><span>Component ID</span><strong className="mono-cell">{stage.id}</strong></div></div><PlaceholderLabel /><p className="drawer-note">Status refreshed from the backend every three seconds.</p></div>;
 }

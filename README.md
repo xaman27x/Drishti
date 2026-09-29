@@ -1,3 +1,8 @@
+> **Integrated local demo:** see [docs/local-demo.md](docs/local-demo.md).
+> Start the API, normalization worker, MinIO, Redpanda and live GUI with:
+> `bash scripts/run-local.sh --approve-builtins --seed`.
+> The flag explicitly approves the two built-in parser packs for this local demo.
+
 # Drishti
 
 Drishti is a lossless log preprocessing framework for perimeter security devices. It receives
@@ -204,7 +209,7 @@ privacy-safe sharing between two sites.
 ### Start the durable local deployment
 
 ```bash
-docker compose up --build
+bash scripts/run-local.sh --approve-builtins --seed
 ```
 
 This starts Drishti with Redpanda and MinIO. The supplied credentials and single-node services are

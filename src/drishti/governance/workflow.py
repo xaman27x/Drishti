@@ -217,3 +217,10 @@ class ParserControlPlane:
             return self._proposals[proposal_id]
         except KeyError as exc:
             raise KeyError(f"proposal {proposal_id!r} does not exist") from exc
+
+    @property
+    def proposals(self) -> tuple[ParserProposal, ...]:
+        return tuple(self._proposals.values())
+
+    def restore_proposals(self, proposals: list[ParserProposal]) -> None:
+        self._proposals = {proposal.proposal_id: proposal for proposal in proposals}

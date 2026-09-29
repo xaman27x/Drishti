@@ -1,28 +1,51 @@
+x-app: &app
+  image: drishti:local
+  pull_policy: never
+  env_file: .env
+  environment: &app-env
+    DRISHTI_ENVIRONMENT: local
+    DRISHTI_ADAPTER_MODE: durable
+    DRISHTI_STATE_DIR: /state
+    DRISHTI_MINIO_ACCESS_KEY: ${DRISHTI_MINIO_ACCESS_KEY:-drishti}
+    DRISHTI_MINIO_SECRET_KEY: ${DRISHTI_MINIO_SECRET_KEY:-drishti-local-demo-change-me}
+    DRISHTI_DEMO_ADMIN_ENABLED: ${DRISHTI_DEMO_ADMIN_ENABLED:-true}
+    DRISHTI_DRIFT_BASELINE_SIZE: ${DRISHTI_DRIFT_BASELINE_SIZE:-4}
+    DRISHTI_DRIFT_WINDOW_SIZE: ${DRISHTI_DRIFT_WINDOW_SIZE:-2}
+  volumes:
+    - drishti-state:/state
+  restart: unless-stopped
+
 services:
-  api:
-    build: .
-    depends_on:
-      minio:
-        condition: service_healthy
-      redpanda:
-        condition: service_healthy
-    environment:
-      DRISHTI_ENVIRONMENT: local
-      DRISHTI_ADAPTER_MODE: durable
-      DRISHTI_LOG_LEVEL: INFO
-      DRISHTI_MAX_EVENT_BYTES: 1048576
-      DRISHTI_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
-      DRISHTI_MINIO_ENDPOINT: minio:9000
-      DRISHTI_MINIO_ACCESS_KEY: drishti
-      DRISHTI_MINIO_SECRET_KEY: change-me-in-production
-      DRISHTI_MINIO_BUCKET: drishti-raw-evidence
-    ports:
-      - "8080:8080"
+  state-init:
+    <<: *app
+    user: "0:0"
+    entrypoint: ["python", "-c"]
+    command: ["import os; os.makedirs('/state', exist_ok=True); os.chown('/state',65532,65532); os.chmod('/state',0o700)"]
+    restart: "no"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/live')"]
-      interval: 10s
+      disable: true
+
+  minio:
+    image: drishti-minio:local
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: deploy/minio.Dockerfile
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${DRISHTI_MINIO_ACCESS_KEY:-drishti}
+      MINIO_ROOT_PASSWORD: ${DRISHTI_MINIO_SECRET_KEY:-drishti-local-demo-change-me}
+    ports:
+      - "127.0.0.1:${DRISHTI_MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${DRISHTI_MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 5s
       timeout: 3s
-      retries: 3
+      retries: 30
 
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v26.1.12
@@ -37,32 +60,94 @@ services:
       - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
     ports:
-      - "19092:19092"
+      - "127.0.0.1:19092:19092"
     volumes:
       - redpanda-data:/var/lib/redpanda/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
+      retries: 30
+
+  topic-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.12
+    entrypoint: ["/bin/sh", "-ec"]
+    environment:
+      TOPIC: ${DRISHTI_KAFKA_ARCHIVED_TOPIC:-drishti.raw.archived.v1}
+    command:
+      - 'rpk topic describe "$$TOPIC" -X brokers=redpanda:9092 >/dev/null 2>&1 || rpk topic create "$$TOPIC" --partitions 3 --replicas 1 -X brokers=redpanda:9092'
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: "no"
+
+  bootstrap:
+    <<: *app
+    environment:
+      <<: *app-env
+      DRISHTI_APPROVE_BUILTINS: ${DRISHTI_APPROVE_BUILTINS:-false}
+    entrypoint: ["python", "-m", "drishti.runtime.bootstrap"]
+    command: ["--approve-builtins"]
+    depends_on:
+      state-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  worker:
+    <<: *app
+    entrypoint: ["python", "-m", "drishti.runtime.worker"]
+    command: []
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      topic-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "drishti.runtime.healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 6
+
+  api:
+    <<: *app
+    build: .
+    ports:
+      - "127.0.0.1:${DRISHTI_API_PORT:-8080}:8080"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      topic-init:
+        condition: service_completed_successfully
+      worker:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=15)"]
+      interval: 10s
+      timeout: 20s
+      start_period: 20s
       retries: 12
 
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-10-15T17-29-55Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: drishti
-      MINIO_ROOT_PASSWORD: change-me-in-production
+  frontend:
+    build: ./frontend
     ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/data
+      - "127.0.0.1:${DRISHTI_FRONTEND_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
       interval: 10s
-      timeout: 5s
-      retries: 12
+      timeout: 3s
+      retries: 6
 
 volumes:
   minio-data:
   redpanda-data:
+  drishti-state:

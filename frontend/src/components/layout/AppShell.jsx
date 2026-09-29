@@ -20,6 +20,8 @@ import {
   Workflow,
   X,
 } from "lucide-react";
+import { api } from "../../services/api.js";
+import { useResource } from "../../hooks/useResource.js";
 import { StatusTag } from "../common/UI.jsx";
 
 const navigation = [
@@ -36,6 +38,8 @@ const navigation = [
 const pageNames = Object.fromEntries(navigation.map(({ label, path }) => [path, label]));
 
 export default function AppShell({ children, darkMode, onToggleTheme }) {
+  const health = useResource(api.getSystemHealth);
+  const healthy = !health.error && health.data?.status === "ready";
   const [collapsed, setCollapsed] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -62,7 +66,7 @@ export default function AppShell({ children, darkMode, onToggleTheme }) {
 
         <div className="workspace-switcher">
           <div className="workspace-avatar">N</div>
-          <div className="workspace-copy"><strong>Northstar Labs</strong><span>Workspace</span></div>
+          <div className="workspace-copy"><strong>Local demo</strong><span>Workspace</span></div>
           <ChevronDown size={14} />
         </div>
 
@@ -89,7 +93,7 @@ export default function AppShell({ children, darkMode, onToggleTheme }) {
         </NavLink>
 
         <div className="sidebar-footer">
-          <div className="sidebar-health"><StatusTag status="healthy">System operational</StatusTag></div>
+          <div className="sidebar-health"><StatusTag status={healthy ? "healthy" : "failed"}>{healthy ? "System ready" : "Check system status"}</StatusTag></div>
           <div className="sidebar-footnote"><span>DRISHTI</span><span>v0.4.0</span></div>
           <button className="collapse-control" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
             <ChevronLeft size={15} className={collapsed ? "rotate-180" : ""} /><span>Collapse sidebar</span>
@@ -109,10 +113,10 @@ export default function AppShell({ children, darkMode, onToggleTheme }) {
             <kbd><Command size={11} /> K</kbd>
           </form>
           <div className="topbar-actions">
-            <span className="api-live"><i /> Mock data</span>
+            <span className="api-live"><i /> Live API</span>
             <div className="notice-wrap">
               <button className="icon-button notification-button" aria-label="Notifications" onClick={() => setNoticeOpen(!noticeOpen)}><Bell size={17} /><i /></button>
-              {noticeOpen && <div className="notice-popover"><div className="notice-title">Recent updates</div><p><span className="notice-dot green" /> All pipeline components operational</p><p><span className="notice-dot amber" /> 1 parser awaiting review</p><button onClick={() => setNoticeOpen(false)}>Dismiss</button></div>}
+              {noticeOpen && <div className="notice-popover"><div className="notice-title">Recent updates</div><p><span className="notice-dot green" /> See Pipeline for current dependency checks</p><p><span className="notice-dot amber" /> See Governance for current proposals</p><button onClick={() => setNoticeOpen(false)}>Dismiss</button></div>}
             </div>
             <button className="icon-button theme-control" aria-label={darkMode ? "Switch to light theme" : "Switch to dark theme"} onClick={onToggleTheme}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</button>
             <span className="topbar-divider" />
@@ -122,7 +126,7 @@ export default function AppShell({ children, darkMode, onToggleTheme }) {
 
         <main className="main-content" key={location.pathname}>
           {children}
-          <footer className="content-footer"><span>Preserve. Normalize. Trace.</span><span>All times UTC · Data shown is illustrative</span></footer>
+          <footer className="content-footer"><span>Preserve. Normalize. Trace.</span><span>All times UTC · Local demo controls</span></footer>
         </main>
       </div>
       {mobileNavOpen && <button className="mobile-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />}

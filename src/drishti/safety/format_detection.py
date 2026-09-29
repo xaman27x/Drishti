@@ -150,6 +150,22 @@ class FormatChangeDetector:
         self._baseline: list[FormatFingerprint] = []
         self._window: deque[FormatFingerprint] = deque(maxlen=window_size)
 
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "baseline": [item.model_dump(mode="json") for item in self._baseline],
+            "window": [item.model_dump(mode="json") for item in self._window],
+        }
+
+    def restore(self, snapshot: dict[str, object]) -> None:
+        baseline = snapshot.get("baseline", [])
+        window = snapshot.get("window", [])
+        if not isinstance(baseline, list) or not isinstance(window, list):
+            raise ValueError("invalid detector snapshot")
+        self._baseline = [FormatFingerprint.model_validate(item) for item in baseline]
+        self._window = deque(
+            (FormatFingerprint.model_validate(item) for item in window), maxlen=self._window_size
+        )
+
     def observe(self, *, event_id: UUID, raw: bytes) -> DriftDecision:
         fingerprint = self._fingerprinter.fingerprint(source_key=self.source_key, raw=raw)
         if len(self._baseline) < self._baseline_size:
